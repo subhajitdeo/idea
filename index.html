@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nuvama Implied Spot Engine</title>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
+<style>
+    * { box-sizing: border-box; }
+    body {
+        margin: 0;
+        font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+        background: #0b0e13;
+        color: #e6e6e6;
+        padding: 20px;
+    }
+    h1 {
+        color: #67CF44;
+        font-size: 18px;
+        margin: 0 0 8px;
+        font-weight: 700;
+    }
+    #status {
+        color: #9aa4b2;
+        font-size: 12px;
+        margin-bottom: 16px;
+    }
+    #info {
+        font-size: 13px;
+        margin-bottom: 12px;
+        color: #c8c8d0;
+        padding: 8px 12px;
+        background: #0e1117;
+        border: 1px solid #2a2f3a;
+        border-radius: 6px;
+    }
+    #info b { color: #fff; }
+    #table-container { overflow: auto; max-height: 85vh; }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+    }
+    th, td {
+        padding: 6px 10px;
+        border: 1px solid #1c212b;
+        text-align: right;
+        white-space: nowrap;
+    }
+    th {
+        background: #161b22;
+        color: #9aa4b2;
+        font-weight: 600;
+        font-size: 11px;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
+    .strike {
+        font-weight: 700;
+        text-align: center;
+        background: #131820;
+        color: #fff;
+        font-size: 13px;
+    }
+    .srev { color: #ffd166; font-weight: 700; }
+    .break-ce { color: #67CF44; font-weight: 800; }
+    .break-pe { color: #ff6b6b; font-weight: 800; }
+    .tv { color: #c8c8d0; font-weight: 600; }
+
+    .cell-max-ce-oi { background: #5a1d1d; color: #fff; }
+    .cell-max-pe-oi { background: #14522e; color: #fff; }
+    .cell-max-vol   { background: #10424a; color: #fff; }
+    .cell-yellow    { background: #4d4a00; color: #fff; }
+
+    .atm-marker {
+        display: inline-block;
+        background: #005eff;
+        color: #fff;
+        font-size: 9px;
+        font-weight: 800;
+        padding: 1px 5px;
+        border-radius: 3px;
+        margin-left: 6px;
+        vertical-align: middle;
+    }
+</style>
+</head>
+<body>
+
+<h1>📊 NUVAMA · IMPLIED SPOT ENGINE</h1>
+<div id="status">Loading Python environment…</div>
+<div id="info">Waiting for live data from Nuvama tab…</div>
+<div id="table-container"></div>
+
+<script>
+// ============================================================
+// PYODIDE BOOT
+// ============================================================
+let pyodide = null;
+let pyReady = false;
+
+async function bootPython() {
+    try {
+        pyodide = await loadPyodide();
+        await pyodide.loadPackage(["numpy", "scipy"]);
+        await pyodide.runPythonAsync(PYTHON_ENGINE);
+        pyReady = true;
+        document.getElementById("status").innerText = "✅ Python engine live — waiting for data";
+    } catch (err) {
+        document.getElementById("status").innerText = "❌ Python failed: " + err.message;
+        console.error(err);
+    }
+}
+
+// ============================================================
+// PYTHON ENGINE
+// ============================================================
+const PYTHON_ENGINE = `
+import numpy as np
+from scipy.stats import norm
+from scipy.optimize import brentq
+
+def bs_call(S, K, T, r, sigma):
+    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    return S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+
+def bs_put(S, K, T, r, sigma):
+    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    return K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+
+def solve_reversal(ltp, K, T, r, sigma_pct, opt_type):
+    if ltp is None or ltp <= 0.05:
+        return 0.0
+    if sigma_pct is None or sigma_pct <= 0:
+        return 0.0
+    if T is None or T <= 0:
+        return 0.0
+    sigma = sigma_pct / 100.0
+    fn = bs_call if opt_type == "CE" else bs_put
+    try:
+        return float(brentq(
+            lambda S: fn(S, K, T, r, sigma) - ltp,
+            K - 4000, K + 4000, xtol=1e-5
+        ))
+    except Exception:
+        return 0.0
+
+def compute_all(spot, atm_strike, days_to_expiry, rows, rate_pct):
+    T = days_to_expiry / 365.0
+    r = rate_pct / 100.0
+
+    # Flat ATM IV anchor per side
+    atm_row = next((x for x in rows if x["strike"] == atm_strike), None)
+    atm_ce_iv = atm_row["ceIV"] if atm_row else 12.0
+    atm_pe_iv = atm_row["peIV"] if atm_row else 12.0
+
+    out = []
+    for row in rows:
+        strike = row["strike"]
+
+        ce_srev = solve_reversal(row["ceLTP"], strike, T, r, atm_ce_iv, "CE")
+        pe_srev = solve_reversal(row["peLTP"], strike, T, r, atm_pe_iv, "PE")
+
+        ce_int = max(0.0, spot - strike)
+        pe_int = max(0.0, strike - spot)
+        ce_tv = max(0.0, row["ceLTP"] - ce_int)
+        pe_tv = max(0.0, row["peLTP"] - pe_int)
+
+        out.append({
+            "strike": strike,
+            "ceOI": row["ceOI"],
+            "ceVol": row["ceVol"],
+            "ceTV": ce_tv,
+            "ceSRev": ce_srev,
+            "peSRev": pe_srev,
+            "peTV": pe_tv,
+            "peVol": row["peVol"],
+            "peOI": row["peOI"]
+        })
+
+    return out
+`;
+
+// ============================================================
+// LISTEN FOR DATA FROM EXTENSION
+// ============================================================
+window.addEventListener("message", async (event) => {
+    if (event.source !== window) return;
+    if (!event.data || event.data.source !== "nuvama-extension") return;
+
+    if (event.data.type === "RELAY_READY") {
+        console.log("[webapp] extension relay ready");
+        return;
+    }
+
+    if (event.data.type !== "NUVAMA_DATA") return;
+    if (!pyReady) return;
+
+    const data = event.data.payload;
+
+    try {
+        // Convert the JS payload into Python and call compute_all
+        pyodide.globals.set("_spot", data.spot);
+        pyodide.globals.set("_atm", data.atmStrike);
+        pyodide.globals.set("_days", data.daysToExpiry);
+        pyodide.globals.set("_rows_json", JSON.stringify(data.rows));
+        pyodide.globals.set("_rate", 6.5);
+
+        const resultJson = pyodide.runPython(`
+import json
+_rows = json.loads(_rows_json)
+_result = compute_all(_spot, _atm, _days, _rows, _rate)
+json.dumps(_result)
+`);
+
+        const computed = JSON.parse(resultJson);
+
+        renderInfo(data, computed);
+        renderTable(computed, data.spot, data.atmStrike);
+
+        document.getElementById("status").innerText =
+            "✅ Live — updated " + new Date().toLocaleTimeString();
+    } catch (err) {
+        document.getElementById("status").innerText = "❌ Compute error: " + err.message;
+        console.error(err);
+    }
+});
+
+// ============================================================
+// RENDER INFO BAR
+// ============================================================
+function renderInfo(data, rows) {
+    const info = document.getElementById("info");
+    const expDays = data.daysToExpiry.toFixed(2);
+
+    const atmRow = rows.find(r => r.strike === data.atmStrike);
+    const ceSRevAtm = atmRow ? atmRow.ceSRev.toFixed(2) : "—";
+    const peSRevAtm = atmRow ? atmRow.peSRev.toFixed(2) : "—";
+
+    info.innerHTML = `
+        Spot: <b>${data.spot.toFixed(2)}</b> |
+        ATM: <b>${data.atmStrike}</b> |
+        CE S-Rev: <b>${ceSRevAtm}</b> |
+        PE S-Rev: <b>${peSRevAtm}</b> |
+        Exp in <b>${expDays}d</b> |
+        ${new Date().toLocaleTimeString()}
+    `;
+}
+
+// ============================================================
+// RENDER TABLE
+// ============================================================
+function renderTable(rows, spot, atmStrike) {
+    const container = document.getElementById("table-container");
+    if (!container) return;
+
+    const maxCE_OI  = Math.max(...rows.map(r => r.ceOI), 0);
+    const maxPE_OI  = Math.max(...rows.map(r => r.peOI), 0);
+    const maxCE_Vol = Math.max(...rows.map(r => r.ceVol), 0);
+    const maxPE_Vol = Math.max(...rows.map(r => r.peVol), 0);
+
+    let html = `<table><thead><tr>
+        <th>CE OI</th>
+        <th>CE Vol</th>
+        <th>CE TV</th>
+        <th>CE S-Rev</th>
+        <th>STRIKE</th>
+        <th>PE S-Rev</th>
+        <th>PE TV</th>
+        <th>PE Vol</th>
+        <th>PE OI</th>
+    </tr></thead><tbody>`;
+
+    rows.forEach(r => {
+        const isATM = r.strike === atmStrike;
+
+        // CE OI cell
+        const ceOICls = r.ceOI === maxCE_OI ? "cell-max-ce-oi"
+                      : (maxCE_OI && r.ceOI / maxCE_OI >= 0.75) ? "cell-yellow" : "";
+        // CE Vol cell
+        const ceVolCls = r.ceVol === maxCE_Vol ? "cell-max-vol"
+                       : (maxCE_Vol && r.ceVol / maxCE_Vol >= 0.75) ? "cell-yellow" : "";
+
+        // PE Vol cell
+        const peVolCls = r.peVol === maxPE_Vol ? "cell-max-vol"
+                       : (maxPE_Vol && r.peVol / maxPE_Vol >= 0.75) ? "cell-yellow" : "";
+        // PE OI cell
+        const peOICls = r.peOI === maxPE_OI ? "cell-max-pe-oi"
+                      : (maxPE_OI && r.peOI / maxPE_OI >= 0.75) ? "cell-yellow" : "";
+
+        // CE S-Rev
+        let ceSRevHtml;
+        if (r.ceSRev > 0 && spot >= r.ceSRev) {
+            ceSRevHtml = `<td class="break-ce">${r.ceSRev.toFixed(1)} ●</td>`;
+        } else {
+            ceSRevHtml = `<td class="srev">${r.ceSRev.toFixed(2)}</td>`;
+        }
+
+        // PE S-Rev
+        let peSRevHtml;
+        if (r.peSRev > 0 && spot <= r.peSRev) {
+            peSRevHtml = `<td class="break-pe">${r.peSRev.toFixed(1)} ●</td>`;
+        } else {
+            peSRevHtml = `<td class="srev">${r.peSRev.toFixed(2)}</td>`;
+        }
+
+        html += `<tr>`;
+        html += `<td class="${ceOICls}">${r.ceOI.toFixed(2)}</td>`;
+        html += `<td class="${ceVolCls}">${r.ceVol.toLocaleString("en-IN")}</td>`;
+        html += `<td class="tv">${r.ceTV.toFixed(2)}</td>`;
+        html += ceSRevHtml;
+        html += `<td class="strike">${r.strike.toLocaleString("en-IN")}${isATM ? '<span class="atm-marker">ATM</span>' : ''}</td>`;
+        html += peSRevHtml;
+        html += `<td class="tv">${r.peTV.toFixed(2)}</td>`;
+        html += `<td class="${peVolCls}">${r.peVol.toLocaleString("en-IN")}</td>`;
+        html += `<td class="${peOICls}">${r.peOI.toFixed(2)}</td>`;
+        html += `</tr>`;
+    });
+
+    html += `</tbody></table>`;
+    container.innerHTML = html;
+}
+
+// ============================================================
+// BOOT
+// ============================================================
+bootPython();
+</script>
+
+</body>
+</html>
