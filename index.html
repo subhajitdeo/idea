@@ -115,71 +115,96 @@ async function bootPython() {
 }
 
 // ============================================================
-// PYTHON ENGINE
+// PYTHON ENGINE — NEWTON-RAPHSON, PER-STRIKE IV
 // ============================================================
 const PYTHON_ENGINE = `
 import numpy as np
 from scipy.stats import norm
-from scipy.optimize import brentq
 
-def bs_call(S, K, T, r, sigma):
+def bs_call_and_delta(S, K, T, r, sigma):
+    if S <= 0 or K <= 0 or T <= 0 or sigma <= 0:
+        return 0.0, 0.0
     d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
     d2 = d1 - sigma * np.sqrt(T)
-    return S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+    price = S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+    delta = norm.cdf(d1)
+    return price, delta
 
-def bs_put(S, K, T, r, sigma):
+def bs_put_and_delta(S, K, T, r, sigma):
+    if S <= 0 or K <= 0 or T <= 0 or sigma <= 0:
+        return 0.0, 0.0
     d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
     d2 = d1 - sigma * np.sqrt(T)
-    return K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+    price = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+    delta = norm.cdf(d1) - 1.0
+    return price, delta
 
-def solve_reversal(ltp, K, T, r, sigma_pct, opt_type):
+def solve_reversal_newton(ltp, K, T, r, sigma_pct, opt_type):
+    """Newton-Raphson solver — uses analytical Delta for fast convergence."""
     if ltp is None or ltp <= 0.05:
         return 0.0
     if sigma_pct is None or sigma_pct <= 0:
         return 0.0
     if T is None or T <= 0:
         return 0.0
+
     sigma = sigma_pct / 100.0
-    fn = bs_call if opt_type == "CE" else bs_put
-    try:
-        return float(brentq(
-            lambda S: fn(S, K, T, r, sigma) - ltp,
-            K - 4000, K + 4000, xtol=1e-5
-        ))
-    except Exception:
-        return 0.0
+    S = float(K)
+    fn = bs_call_and_delta if opt_type == "CE" else bs_put_and_delta
+
+    for _ in range(15):
+        price, delta = fn(S, K, T, r, sigma)
+        diff = price - ltp
+
+        if abs(diff) < 0.0001:
+            return float(S)
+
+        if abs(delta) < 1e-6:
+            break
+
+        S = S - (diff / delta)
+
+        if S <= 0 or not np.isfinite(S):
+            return 0.0
+
+    return float(S)
 
 def compute_all(spot, atm_strike, days_to_expiry, rows, rate_pct):
-    T = days_to_expiry / 365.0
+    T = max(1e-5, days_to_expiry / 365.0)
     r = rate_pct / 100.0
-
-    # Flat ATM IV anchor per side
-    atm_row = next((x for x in rows if x["strike"] == atm_strike), None)
-    atm_ce_iv = atm_row["ceIV"] if atm_row else 12.0
-    atm_pe_iv = atm_row["peIV"] if atm_row else 12.0
 
     out = []
     for row in rows:
         strike = row["strike"]
+        ce_iv = row.get("ceIV") or 0
+        pe_iv = row.get("peIV") or 0
 
-        ce_srev = solve_reversal(row["ceLTP"], strike, T, r, atm_ce_iv, "CE")
-        pe_srev = solve_reversal(row["peLTP"], strike, T, r, atm_pe_iv, "PE")
+        # Per-strike, per-side IV. Skip row if IV is missing (Q1 = a)
+        if ce_iv > 0:
+            ce_srev = solve_reversal_newton(row.get("ceLTP"), strike, T, r, ce_iv, "CE")
+        else:
+            ce_srev = 0.0
+
+        if pe_iv > 0:
+            pe_srev = solve_reversal_newton(row.get("peLTP"), strike, T, r, pe_iv, "PE")
+        else:
+            pe_srev = 0.0
 
         ce_int = max(0.0, spot - strike)
         pe_int = max(0.0, strike - spot)
-        ce_tv = max(0.0, row["ceLTP"] - ce_int)
-        pe_tv = max(0.0, row["peLTP"] - pe_int)
+        ce_tv = max(0.0, (row.get("ceLTP") or 0.0) - ce_int)
+        pe_tv = max(0.0, (row.get("peLTP") or 0.0) - pe_int)
 
         out.append({
             "strike": strike,
-            "ceOI": row["ceOI"],
-            "ceVol": row["ceVol"],
+            "ceOI": row.get("ceOI", 0),
+            "ceVol": row.get("ceVol", 0),
             "ceTV": ce_tv,
             "ceSRev": ce_srev,
             "peSRev": pe_srev,
             "peTV": pe_tv,
-            "peVol": row["peVol"],
-            "peOI": row["peOI"]
+            "peVol": row.get("peVol", 0),
+            "peOI": row.get("peOI", 0)
         })
 
     return out
@@ -203,7 +228,6 @@ window.addEventListener("message", async (event) => {
     const data = event.data.payload;
 
     try {
-        // Convert the JS payload into Python and call compute_all
         pyodide.globals.set("_spot", data.spot);
         pyodide.globals.set("_atm", data.atmStrike);
         pyodide.globals.set("_days", data.daysToExpiry);
@@ -278,21 +302,16 @@ function renderTable(rows, spot, atmStrike) {
     rows.forEach(r => {
         const isATM = r.strike === atmStrike;
 
-        // CE OI cell
         const ceOICls = r.ceOI === maxCE_OI ? "cell-max-ce-oi"
                       : (maxCE_OI && r.ceOI / maxCE_OI >= 0.75) ? "cell-yellow" : "";
-        // CE Vol cell
         const ceVolCls = r.ceVol === maxCE_Vol ? "cell-max-vol"
                        : (maxCE_Vol && r.ceVol / maxCE_Vol >= 0.75) ? "cell-yellow" : "";
 
-        // PE Vol cell
         const peVolCls = r.peVol === maxPE_Vol ? "cell-max-vol"
                        : (maxPE_Vol && r.peVol / maxPE_Vol >= 0.75) ? "cell-yellow" : "";
-        // PE OI cell
         const peOICls = r.peOI === maxPE_OI ? "cell-max-pe-oi"
                       : (maxPE_OI && r.peOI / maxPE_OI >= 0.75) ? "cell-yellow" : "";
 
-        // CE S-Rev
         let ceSRevHtml;
         if (r.ceSRev > 0 && spot >= r.ceSRev) {
             ceSRevHtml = `<td class="break-ce">${r.ceSRev.toFixed(1)} ●</td>`;
@@ -300,7 +319,6 @@ function renderTable(rows, spot, atmStrike) {
             ceSRevHtml = `<td class="srev">${r.ceSRev.toFixed(2)}</td>`;
         }
 
-        // PE S-Rev
         let peSRevHtml;
         if (r.peSRev > 0 && spot <= r.peSRev) {
             peSRevHtml = `<td class="break-pe">${r.peSRev.toFixed(1)} ●</td>`;
