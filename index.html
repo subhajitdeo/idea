@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Investing Daddy LTP Clone</title>
+<title>LTP Calculator Clone · Structural Method</title>
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
 <style>
     * { box-sizing: border-box; }
@@ -12,13 +12,13 @@
     #status { color: #9aa4b2; font-size: 11px; margin-bottom: 10px; }
     #info { font-size: 12px; color: #c8c8d0; padding: 8px 12px; background: #0e1117; border: 1px solid #2a2f3a; border-radius: 6px; margin-bottom: 12px; }
     #info b { color: #fff; }
-    #info .live-dot { display: inline-block; width: 8px; height: 8px; background: #4ade80; border-radius: 50%; margin-right: 6px; animation: pulse 1.5s infinite; }
+    .live-dot { display: inline-block; width: 8px; height: 8px; background: #4ade80; border-radius: 50%; margin-right: 6px; animation: pulse 1.5s infinite; }
     @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
     .state-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
     .state-card { padding: 10px 14px; border-radius: 8px; border: 1px solid #2a2f3a; background: #0e1117; }
     .state-label { font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; }
-    .state-value { font-size: 18px; font-weight: 800; margin: 2px 0; }
+    .state-value { font-size: 20px; font-weight: 800; margin: 2px 0; letter-spacing: 1px; }
     .state-sub { font-size: 10px; color: #9aa4b2; }
     .state-strong { color: #9aa4b2; }
     .state-wtt { color: #4ade80; }
@@ -33,38 +33,40 @@
     .lvl-ext { color: #ffa500; }
     .lvl-below { color: #8b0000; }
 
-    #table-container { overflow: auto; max-height: 68vh; }
+    #table-container { overflow: auto; max-height: 65vh; }
     table { width: 100%; border-collapse: collapse; font-size: 11px; }
     th, td { padding: 5px 8px; border: 1px solid #1c212b; text-align: right; white-space: nowrap; }
     th { background: #161b22; color: #9aa4b2; font-weight: 600; font-size: 10px; position: sticky; top: 0; z-index: 1; }
-    .strike-col { font-weight: 700; text-align: center; background: #131820; color: #fff; font-size: 12px; position: relative; }
-    .pct-badge { font-size: 8px; color: #ffd166; display: block; }
-    .cell-max { background: #5a1d1d; color: #fff; }
+    .strike-col { font-weight: 700; text-align: center; background: #131820; color: #fff; font-size: 12px; }
+    .cell-max-ce { background: #5a1d1d; color: #fff; }
     .cell-max-pe { background: #14522e; color: #fff; }
     .cell-yellow { background: #4d4a00; color: #fff; }
     .cell-vol-max { background: #10424a; color: #fff; }
+    .srev-col { color: #ffd166; font-weight: 700; }
     .breakout { color: #67CF44; font-weight: 800; }
     .breakdown { color: #ff6b6b; font-weight: 800; }
     .badge { display: inline-block; font-size: 8px; font-weight: 800; padding: 1px 4px; border-radius: 3px; margin-left: 4px; vertical-align: middle; }
     .badge-atm { background: #005eff; color: #fff; }
-    .badge-pillar { background: #a855f7; color: #fff; }
-    .badge-breakout { background: #67CF44; color: #0b0e13; }
+    .badge-ce-pillar { background: #ff4444; color: #fff; }
+    .badge-pe-pillar { background: #67CF44; color: #0b0e13; }
+    .badge-chal { background: #fbbf24; color: #0b0e13; }
+    .badge-yellow { background: #4d4a00; color: #fff; }
 </style>
 </head>
 <body>
 
-<h1>📊 INVESTING DADDY LTP CLONE</h1>
+<h1>📊 LTP CALCULATOR CLONE · STRUCTURAL METHOD</h1>
 <div id="status">Loading Python environment…</div>
 <div id="info">Waiting for live data from Nuvama tab…</div>
 
 <div class="state-row">
     <div class="state-card">
-        <div class="state-label">CE Side (Resistance)</div>
+        <div class="state-label">CE State (Resistance)</div>
         <div class="state-value state-strong" id="ce-state">—</div>
         <div class="state-sub" id="ce-state-sub">—</div>
     </div>
     <div class="state-card">
-        <div class="state-label">PE Side (Support)</div>
+        <div class="state-label">PE State (Support)</div>
         <div class="state-value state-strong" id="pe-state">—</div>
         <div class="state-sub" id="pe-state-sub">—</div>
     </div>
@@ -100,16 +102,19 @@
 <div id="table-container"></div>
 
 <script>
+// ============================================================
+// PYODIDE BOOT
+// ============================================================
 let pyodide = null;
 let pyReady = false;
 
 async function bootPython() {
     try {
         pyodide = await loadPyodide();
-        await pyodide.loadPackage(["numpy", "scipy"]);
+        await pyodide.loadPackage(["numpy"]);
         await pyodide.runPythonAsync(PYTHON_ENGINE);
         pyReady = true;
-        document.getElementById("status").innerText = "✅ Python engine live — waiting for data";
+        document.getElementById("status").innerText = "✅ Structural engine live — waiting for data";
     } catch (err) {
         document.getElementById("status").innerText = "❌ Python failed: " + err.message;
         console.error(err);
@@ -117,165 +122,196 @@ async function bootPython() {
 }
 
 // ============================================================
-// PYTHON ENGINE
+// PYTHON ENGINE — OI/VOLUME STRUCTURAL METHOD
 // ============================================================
 const PYTHON_ENGINE = `
 import numpy as np
-from scipy.stats import norm
-import json
 
-def bs_call(S, K, T, r, sigma):
-    if S <= 0 or K <= 0 or T <= 0 or sigma <= 0: return 0.0
-    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-    d2 = d1 - sigma * np.sqrt(T)
-    return S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
-
-def bs_put(S, K, T, r, sigma):
-    if S <= 0 or K <= 0 or T <= 0 or sigma <= 0: return 0.0
-    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-    d2 = d1 - sigma * np.sqrt(T)
-    return K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
-
-def solve_srev(ltp, K, T, r, sigma_pct, opt_type):
-    if ltp is None or ltp <= 0.05 or sigma_pct is None or sigma_pct <= 0 or T <= 0:
-        return 0.0
-    sigma = sigma_pct / 100.0
-    S = float(K)
-    fn = bs_call if opt_type == "CE" else bs_put
-    for _ in range(20):
-        price = fn(S, K, T, r, sigma)
-        diff = price - ltp
-        if abs(diff) < 0.01: return float(S)
-        # Numerical delta
-        h = 0.01
-        delta = (fn(S + h, K, T, r, sigma) - price) / h
-        if abs(delta) < 1e-6: break
-        S = S - diff / delta
-        if S <= 0 or not np.isfinite(S): return 0.0
-    return float(S)
-
-def find_pillar(rows, atm_strike, side, metric):
+def find_pillar(rows, atm_strike, side):
     """
-    Scan outward from ATM on given side (CE = up, PE = down).
-    Return the strike with highest metric value, closest to ATM.
+    Scan from ATM outward.
+    Pick the FIRST strike whose Volume hits 100% (max in visible).
+    If no volume-based pillar exists, fall back to OI.
+    Returns the pillar row.
     """
     sorted_rows = sorted(rows, key=lambda r: r["strike"])
-    atm_idx = None
-    for i, r in enumerate(sorted_rows):
-        if r["strike"] == atm_strike: atm_idx = i; break
-    if atm_idx is None: return None
-
-    max_val = -1
-    pillar = None
-    if side == "CE":
-        for i in range(atm_idx, len(sorted_rows)):
-            v = sorted_rows[i].get(metric) or 0
-            if v > max_val:
-                max_val = v; pillar = sorted_rows[i]
-    else:
-        for i in range(atm_idx, -1, -1):
-            v = sorted_rows[i].get(metric) or 0
-            if v > max_val:
-                max_val = v; pillar = sorted_rows[i]
-    return pillar
-
-def find_challenger(rows, pillar, metric):
-    """Second highest value in the same metric."""
-    sorted_rows = sorted(rows, key=lambda r: -(r.get(metric) or 0))
-    for r in sorted_rows:
-        if r["strike"] != pillar["strike"]:
-            return r
-    return None
-
-def compute_state(rows, pillar, metric, threshold=75.0):
-    """Determine STRONG / WTT / WTB for a side."""
-    if not pillar: return "STRONG", 0.0, None
-    max_val = pillar.get(metric) or 0
-    if max_val <= 0: return "STRONG", 0.0, None
-    challenger = find_challenger(rows, pillar, metric)
-    if not challenger: return "STRONG", 0.0, None
-    chal_val = challenger.get(metric) or 0
-    wpct = (chal_val / max_val) * 100.0
-    if wpct >= threshold:
-        if challenger["strike"] > pillar["strike"]:
-            return "WTT", wpct, challenger
-        elif challenger["strike"] < pillar["strike"]:
-            return "WTB", wpct, challenger
-    return "STRONG", wpct, challenger
-
-def compute_all(spot, atm_strike, days, rows, rate_pct):
-    T = max(1e-5, int(round(days)) / 365.0)
-    r = rate_pct / 100.0
-
-    # CE pillar - use whichever is higher: Volume or OI
-    ce_pillar_vol = find_pillar(rows, atm_strike, "CE", "ceVol")
-    ce_pillar_oi  = find_pillar(rows, atm_strike, "CE", "ceOI")
-    # Prefer Volume (intraday priority)
-    ce_pillar = ce_pillar_vol if ce_pillar_vol else ce_pillar_oi
-
-    pe_pillar_vol = find_pillar(rows, atm_strike, "PE", "peVol")
-    pe_pillar_oi  = find_pillar(rows, atm_strike, "PE", "peOI")
-    pe_pillar = pe_pillar_vol if pe_pillar_vol else pe_pillar_oi
-
-    # Determine state per side
-    ce_state, ce_w, ce_chal = compute_state(rows, ce_pillar, "ceVol")
-    pe_state, pe_w, pe_chal = compute_state(rows, pe_pillar, "peVol")
-
-    # OI-based state as secondary
-    ce_oi_state, _, _ = compute_state(rows, ce_pillar_oi, "ceOI")
-    pe_oi_state, _, _ = compute_state(rows, pe_pillar_oi, "peOI")
-
-    # Compute EOR / EOS via BS solve on pillar strikes
-    sorted_rows = sorted(rows, key=lambda r: r["strike"])
-    def next_strike(from_strike, direction):
-        """direction: +1 for higher, -1 for lower"""
-        for i, row in enumerate(sorted_rows):
-            if row["strike"] == from_strike:
-                n = i + direction
-                if 0 <= n < len(sorted_rows):
-                    return sorted_rows[n]
-                return None
+    atm_idx = next((i for i, r in enumerate(sorted_rows) if r["strike"] == atm_strike), None)
+    if atm_idx is None:
         return None
 
-    eor = eos = eor_p = eor_m = eos_p = eos_m = 0
+    # Volume max in the visible window
+    if side == "CE":
+        max_vol = max(r["ceVol"] for r in sorted_rows)
+        max_oi  = max(r["ceOI"] for r in sorted_rows)
+        # Scan outward (upward)
+        for i in range(atm_idx, len(sorted_rows)):
+            r = sorted_rows[i]
+            if r["ceVol"] >= max_vol * 0.999:
+                return {"row": r, "metric": "Vol", "strike": r["strike"]}
+        # Fallback to OI
+        for i in range(atm_idx, len(sorted_rows)):
+            r = sorted_rows[i]
+            if r["ceOI"] >= max_oi * 0.999:
+                return {"row": r, "metric": "OI", "strike": r["strike"]}
+    else:
+        max_vol = max(r["peVol"] for r in sorted_rows)
+        max_oi  = max(r["peOI"] for r in sorted_rows)
+        # Scan outward (downward)
+        for i in range(atm_idx, -1, -1):
+            r = sorted_rows[i]
+            if r["peVol"] >= max_vol * 0.999:
+                return {"row": r, "metric": "Vol", "strike": r["strike"]}
+        for i in range(atm_idx, -1, -1):
+            r = sorted_rows[i]
+            if r["peOI"] >= max_oi * 0.999:
+                return {"row": r, "metric": "OI", "strike": r["strike"]}
+    return None
+
+def find_challenger(rows, pillar, side):
+    """Second-highest value in the same metric, different strike."""
+    metric = pillar["metric"]
+    field = "ce" + metric
+    if side == "PE":
+        field = "pe" + metric
+    
+    pillar_strike = pillar["strike"]
+    pillar_val = pillar["row"][field]
+    
+    # Find the second-highest value
+    others = [r for r in rows if r["strike"] != pillar_strike]
+    if not others:
+        return None
+    sorted_others = sorted(others, key=lambda r: -r[field])
+    chall_row = sorted_others[0]
+    chall_val = chall_row[field]
+    if pillar_val <= 0:
+        return None
+    wpct = (chall_val / pillar_val) * 100.0
+    return {
+        "row": chall_row,
+        "strike": chall_row["strike"],
+        "value": chall_val,
+        "wpct": wpct
+    }
+
+def compute_state(pillar, challenger, threshold=75.0):
+    """Determine STRONG / WTT / WTB."""
+    if not pillar or not challenger:
+        return "STRONG", 0.0
+    w = challenger["wpct"]
+    if w >= threshold:
+        if challenger["strike"] > pillar["strike"]:
+            return "WTT", w
+        elif challenger["strike"] < pillar["strike"]:
+            return "WTB", w
+    return "STRONG", w
+
+def compute_srev_per_strike(rows, atm_strike):
+    """
+    Structural S-Rev approximation per strike.
+    
+    Logic: Offset from strike driven by the (Volume_CE - Volume_PE) ratio.
+    When CE volume dominates → S-Rev pushed UP (bullish pressure).
+    When PE volume dominates → S-Rev pushed DOWN (bearish pressure).
+    Scale factor keeps offset within realistic range (~±30 points).
+    """
+    out = []
+    SCALE = 25.0  # tune: max offset in points
+    
+    for r in rows:
+        ce_v = r.get("ceVol", 0)
+        pe_v = r.get("peVol", 0)
+        total = ce_v + pe_v
+        if total <= 0:
+            offset = 0
+        else:
+            ratio = (ce_v - pe_v) / total  # -1 to +1
+            offset = ratio * SCALE
+        
+        # For a given strike, CE S-Rev and PE S-Rev use the SAME offset (strike-driven)
+        ce_srev = r["strike"] + offset
+        pe_srev = r["strike"] + offset
+        
+        out.append({
+            "strike": r["strike"],
+            "ceSRev": ce_srev,
+            "peSRev": pe_srev,
+            "offset": offset
+        })
+    return out
+
+def compute_all(spot, atm_strike, days, rows):
+    # Pillars
+    ce_pillar = find_pillar(rows, atm_strike, "CE")
+    pe_pillar = find_pillar(rows, atm_strike, "PE")
+
+    # Challengers
+    ce_chal = find_challenger(rows, ce_pillar, "CE") if ce_pillar else None
+    pe_chal = find_challenger(rows, pe_pillar, "PE") if pe_pillar else None
+
+    # States
+    ce_state, ce_w = compute_state(ce_pillar, ce_chal)
+    pe_state, pe_w = compute_state(pe_pillar, pe_chal)
+
+    # Per-strike S-Rev
+    srev_data = compute_srev_per_strike(rows, atm_strike)
+    srev_map = {s["strike"]: s for s in srev_data}
+
+    # Build per-strike output
+    per_strike = []
+    for r in sorted(rows, key=lambda x: x["strike"]):
+        s = srev_map[r["strike"]]
+        per_strike.append({
+            "strike": r["strike"],
+            "ceOI": r["ceOI"], "ceVol": r["ceVol"], "ceIV": r["ceIV"], "ceLTP": r["ceLTP"],
+            "peOI": r["peOI"], "peVol": r["peVol"], "peIV": r["peIV"], "peLTP": r["peLTP"],
+            "ceSRev": s["ceSRev"],
+            "peSRev": s["peSRev"],
+            "offset": s["offset"],
+            "isCePillar": ce_pillar and r["strike"] == ce_pillar["strike"],
+            "isPePillar": pe_pillar and r["strike"] == pe_pillar["strike"],
+            "isCeChal": ce_chal and r["strike"] == ce_chal["strike"],
+            "isPeChal": pe_chal and r["strike"] == pe_chal["strike"],
+        })
+
+    # EOR / EOS from pillar strikes
+    def lookup(strike):
+        return next((x for x in per_strike if x["strike"] == strike), None)
+
+    eor = eor_p = eor_m = 0
+    eos = eos_p = eos_m = 0
 
     if ce_pillar:
-        eor = solve_srev(ce_pillar["ceLTP"], ce_pillar["strike"], T, r, ce_pillar["ceIV"], "CE")
-        row_p = next_strike(ce_pillar["strike"], +1)
-        row_m = next_strike(ce_pillar["strike"], -1)
-        if row_p: eor_p = solve_srev(row_p["ceLTP"], row_p["strike"], T, r, row_p["ceIV"], "CE")
-        if row_m: eor_m = solve_srev(row_m["ceLTP"], row_m["strike"], T, r, row_m["ceIV"], "CE")
+        ps = ce_pillar["strike"]
+        row = lookup(ps)
+        if row: eor = row["ceSRev"]
+        p_up = lookup(ps + 50)
+        p_dn = lookup(ps - 50)
+        if p_up: eor_p = p_up["ceSRev"]
+        if p_dn: eor_m = p_dn["ceSRev"]
 
     if pe_pillar:
-        eos = solve_srev(pe_pillar["peLTP"], pe_pillar["strike"], T, r, pe_pillar["peIV"], "PE")
-        row_p = next_strike(pe_pillar["strike"], +1)
-        row_m = next_strike(pe_pillar["strike"], -1)
-        if row_p: eos_p = solve_srev(row_p["peLTP"], row_p["strike"], T, r, row_p["peIV"], "PE")
-        if row_m: eos_m = solve_srev(row_m["peLTP"], row_m["strike"], T, r, row_m["peIV"], "PE")
-
-    # Per-strike table data
-    per_strike = []
-    for row in sorted_rows:
-        per_strike.append({
-            "strike": row["strike"],
-            "ceOI": row["ceOI"], "ceVol": row["ceVol"], "ceIV": row["ceIV"], "ceLTP": row["ceLTP"],
-            "peOI": row["peOI"], "peVol": row["peVol"], "peIV": row["peIV"], "peLTP": row["peLTP"],
-            "ceSRev": solve_srev(row["ceLTP"], row["strike"], T, r, row["ceIV"], "CE"),
-            "peSRev": solve_srev(row["peLTP"], row["strike"], T, r, row["peIV"], "PE"),
-            "isCePillar": ce_pillar and row["strike"] == ce_pillar["strike"],
-            "isPePillar": pe_pillar and row["strike"] == pe_pillar["strike"],
-        })
+        ps = pe_pillar["strike"]
+        row = lookup(ps)
+        if row: eos = row["peSRev"]
+        p_up = lookup(ps + 50)
+        p_dn = lookup(ps - 50)
+        if p_up: eos_p = p_up["peSRev"]
+        if p_dn: eos_m = p_dn["peSRev"]
 
     return {
         "spot": spot,
         "atm": atm_strike,
         "cePillarStrike": ce_pillar["strike"] if ce_pillar else None,
+        "cePillarMetric": ce_pillar["metric"] if ce_pillar else None,
         "pePillarStrike": pe_pillar["strike"] if pe_pillar else None,
-        "ceState": ce_state, "ceW": ce_w, "ceOIState": ce_oi_state,
-        "peState": pe_state, "peW": pe_w, "peOIState": pe_oi_state,
-        "EOR": eor, "EOS": eos,
-        "EORplus": eor_p, "EORminus": eor_m,
-        "EOSplus": eos_p, "EOSminus": eos_m,
+        "pePillarMetric": pe_pillar["metric"] if pe_pillar else None,
+        "ceChalStrike": ce_chal["strike"] if ce_chal else None,
+        "peChalStrike": pe_chal["strike"] if pe_chal else None,
+        "ceState": ce_state, "ceW": ce_w,
+        "peState": pe_state, "peW": pe_w,
+        "EOR": eor, "EORplus": eor_p, "EORminus": eor_m,
+        "EOS": eos, "EOSplus": eos_p, "EOSminus": eos_m,
         "perStrike": per_strike
     }
 `;
@@ -296,12 +332,11 @@ window.addEventListener("message", async (event) => {
         pyodide.globals.set("_atm", data.atmStrike);
         pyodide.globals.set("_days", data.daysToExpiry);
         pyodide.globals.set("_rows_json", JSON.stringify(data.rows));
-        pyodide.globals.set("_rate", 6.5);
 
         const resultJson = pyodide.runPython(`
 import json
 _rows = json.loads(_rows_json)
-_result = compute_all(_spot, _atm, _days, _rows, _rate)
+_result = compute_all(_spot, _atm, _days, _rows)
 json.dumps(_result)
 `);
 
@@ -330,7 +365,6 @@ function saveCache(result) {
         hist.push(snap);
         if (hist.length > 500) hist = hist.slice(-500);
         localStorage.setItem("ltp_history", JSON.stringify(hist));
-        localStorage.setItem("ltp_latest", JSON.stringify(result));
     } catch (e) {}
 }
 
@@ -338,21 +372,18 @@ function saveCache(result) {
 // RENDER
 // ============================================================
 function renderAll(r, raw) {
-    // Info bar
     document.getElementById("info").innerHTML = `
         <span class="live-dot"></span>
         Spot: <b>${r.spot.toFixed(2)}</b> |
         ATM: <b>${r.atm}</b> |
         Exp in <b>${raw.daysToExpiry}d</b> |
-        CE Pillar: <b>${r.cePillarStrike || "—"}</b> |
-        PE Pillar: <b>${r.pePillarStrike || "—"}</b>
+        CE Pillar: <b>${r.cePillarStrike || "—"}</b> (${r.cePillarMetric || "—"}) |
+        PE Pillar: <b>${r.pePillarStrike || "—"}</b> (${r.pePillarMetric || "—"})
     `;
 
-    // State cards
-    renderState("ce", r.ceState, r.ceW, r.cePillarStrike, r.ceOIState);
-    renderState("pe", r.peState, r.peW, r.pePillarStrike, r.peOIState);
+    renderState("ce", r.ceState, r.ceW, r.cePillarStrike, r.ceChalStrike);
+    renderState("pe", r.peState, r.peW, r.pePillarStrike, r.peChalStrike);
 
-    // Levels
     document.getElementById("lvl-eor").textContent = r.EOR ? r.EOR.toFixed(1) : "—";
     document.getElementById("lvl-eor-plus").textContent = r.EORplus ? r.EORplus.toFixed(1) : "—";
     document.getElementById("lvl-eor-minus").textContent = r.EORminus ? r.EORminus.toFixed(1) : "—";
@@ -360,34 +391,32 @@ function renderAll(r, raw) {
     document.getElementById("lvl-eos-plus").textContent = r.EOSplus ? r.EOSplus.toFixed(1) : "—";
     document.getElementById("lvl-eos-minus").textContent = r.EOSminus ? r.EOSminus.toFixed(1) : "—";
 
-    // Table
     renderTable(r, raw);
 }
 
-function renderState(side, state, w, pillarStrike, oiState) {
+function renderState(side, state, w, pillar, chal) {
     const valEl = document.getElementById(side + "-state");
     const subEl = document.getElementById(side + "-state-sub");
     const cls = state === "WTT" ? "state-wtt" : state === "WTB" ? "state-wtb" : "state-strong";
     valEl.className = "state-value " + cls;
     valEl.textContent = state;
-    subEl.textContent = `Pillar: ${pillarStrike || "—"} | Weakness: ${w.toFixed(1)}% | OI State: ${oiState}`;
+    const chalStr = chal ? ` → Challenger: ${chal}` : "";
+    subEl.textContent = `Pillar: ${pillar || "—"} | Weakness: ${w.toFixed(1)}%${chalStr}`;
 }
 
 function renderTable(r, raw) {
     const rows = r.perStrike;
-    const maxCE_OI = Math.max(...rows.map(x => x.ceOI), 0);
-    const maxPE_OI = Math.max(...rows.map(x => x.peOI), 0);
+    const maxCE_OI  = Math.max(...rows.map(x => x.ceOI), 0);
+    const maxPE_OI  = Math.max(...rows.map(x => x.peOI), 0);
     const maxCE_Vol = Math.max(...rows.map(x => x.ceVol), 0);
     const maxPE_Vol = Math.max(...rows.map(x => x.peVol), 0);
 
     let html = `<table><thead><tr>
         <th>CE OI</th>
         <th>CE Vol</th>
-        <th>CE LTP</th>
         <th>CE S-Rev</th>
         <th>STRIKE</th>
         <th>PE S-Rev</th>
-        <th>PE LTP</th>
         <th>PE Vol</th>
         <th>PE OI</th>
     </tr></thead><tbody>`;
@@ -395,33 +424,27 @@ function renderTable(r, raw) {
     rows.forEach(row => {
         const isATM = row.strike === r.atm;
 
-        // Heatmap classes
-        const ceOICls = row.ceOI === maxCE_OI ? "cell-max" : (maxCE_OI && row.ceOI / maxCE_OI >= 0.75) ? "cell-yellow" : "";
+        const ceOICls = row.ceOI === maxCE_OI ? "cell-max-ce" : (maxCE_OI && row.ceOI / maxCE_OI >= 0.75) ? "cell-yellow" : "";
         const ceVolCls = row.ceVol === maxCE_Vol ? "cell-vol-max" : (maxCE_Vol && row.ceVol / maxCE_Vol >= 0.75) ? "cell-yellow" : "";
         const peVolCls = row.peVol === maxPE_Vol ? "cell-vol-max" : (maxPE_Vol && row.peVol / maxPE_Vol >= 0.75) ? "cell-yellow" : "";
         const peOICls = row.peOI === maxPE_OI ? "cell-max-pe" : (maxPE_OI && row.peOI / maxPE_OI >= 0.75) ? "cell-yellow" : "";
 
-        // Breakout/Breakdown detection
         const ceBreakout = row.ceSRev > 0 && r.spot >= row.ceSRev;
         const peBreakdown = row.peSRev > 0 && r.spot <= row.peSRev;
 
-        const ceSRevCls = ceBreakout ? "breakout" : "";
-        const peSRevCls = peBreakdown ? "breakdown" : "";
-
-        // Badges
         let strikeHtml = row.strike.toLocaleString("en-IN");
         if (isATM) strikeHtml += '<span class="badge badge-atm">ATM</span>';
-        if (row.isCePillar) strikeHtml += '<span class="badge badge-pillar">CE-P</span>';
-        if (row.isPePillar) strikeHtml += '<span class="badge badge-pillar">PE-P</span>';
+        if (row.isCePillar) strikeHtml += '<span class="badge badge-ce-pillar">CE-P</span>';
+        if (row.isPePillar) strikeHtml += '<span class="badge badge-pe-pillar">PE-P</span>';
+        if (row.isCeChal) strikeHtml += '<span class="badge badge-chal">CE-C</span>';
+        if (row.isPeChal) strikeHtml += '<span class="badge badge-chal">PE-C</span>';
 
         html += `<tr>`;
         html += `<td class="${ceOICls}">${row.ceOI.toFixed(2)}</td>`;
         html += `<td class="${ceVolCls}">${row.ceVol.toLocaleString("en-IN")}</td>`;
-        html += `<td>${row.ceLTP.toFixed(2)}</td>`;
-        html += `<td class="${ceSRevCls}">${row.ceSRev.toFixed(1)}${ceBreakout ? " ▲" : ""}</td>`;
+        html += `<td class="srev-col ${ceBreakout ? 'breakout' : ''}">${row.ceSRev.toFixed(1)}${ceBreakout ? " ▲" : ""}</td>`;
         html += `<td class="strike-col">${strikeHtml}</td>`;
-        html += `<td class="${peSRevCls}">${row.peSRev.toFixed(1)}${peBreakdown ? " ▼" : ""}</td>`;
-        html += `<td>${row.peLTP.toFixed(2)}</td>`;
+        html += `<td class="srev-col ${peBreakdown ? 'breakdown' : ''}">${row.peSRev.toFixed(1)}${peBreakdown ? " ▼" : ""}</td>`;
         html += `<td class="${peVolCls}">${row.peVol.toLocaleString("en-IN")}</td>`;
         html += `<td class="${peOICls}">${row.peOI.toFixed(2)}</td>`;
         html += `</tr>`;
