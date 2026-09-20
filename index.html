@@ -3,180 +3,103 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Nuvama GEX Engine</title>
+<title>Investing Daddy LTP Clone</title>
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
 <style>
     * { box-sizing: border-box; }
-    body {
-        margin: 0;
-        font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-        background: #0b0e13;
-        color: #e6e6e6;
-        padding: 20px;
-    }
-    h1 {
-        color: #67CF44;
-        font-size: 18px;
-        margin: 0 0 8px;
-        font-weight: 700;
-    }
-    #status {
-        color: #9aa4b2;
-        font-size: 12px;
-        margin-bottom: 16px;
-    }
-    #info {
-        font-size: 13px;
-        margin-bottom: 12px;
-        color: #c8c8d0;
-        padding: 8px 12px;
-        background: #0e1117;
-        border: 1px solid #2a2f3a;
-        border-radius: 6px;
-    }
+    body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: #0b0e13; color: #e6e6e6; padding: 16px; font-size: 12px; }
+    h1 { color: #67CF44; font-size: 16px; margin: 0 0 8px; font-weight: 700; }
+    #status { color: #9aa4b2; font-size: 11px; margin-bottom: 10px; }
+    #info { font-size: 12px; color: #c8c8d0; padding: 8px 12px; background: #0e1117; border: 1px solid #2a2f3a; border-radius: 6px; margin-bottom: 12px; }
     #info b { color: #fff; }
+    #info .live-dot { display: inline-block; width: 8px; height: 8px; background: #4ade80; border-radius: 50%; margin-right: 6px; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
-    #gex-bar {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 10px;
-        margin-bottom: 16px;
-    }
-    .gex-card {
-        padding: 12px;
-        background: #0e1117;
-        border: 1px solid #2a2f3a;
-        border-radius: 8px;
-    }
-    .gex-label {
-        font-size: 10px;
-        color: #6b7280;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        margin-bottom: 4px;
-    }
-    .gex-value {
-        font-size: 18px;
-        font-weight: 800;
-        color: #fff;
-    }
-    .gex-sub {
-        font-size: 10px;
-        color: #9aa4b2;
-        margin-top: 4px;
-    }
-    .gex-positive { color: #4ade80; }
-    .gex-negative { color: #f87171; }
-    .gex-neutral  { color: #fbbf24; }
+    .state-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+    .state-card { padding: 10px 14px; border-radius: 8px; border: 1px solid #2a2f3a; background: #0e1117; }
+    .state-label { font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; }
+    .state-value { font-size: 18px; font-weight: 800; margin: 2px 0; }
+    .state-sub { font-size: 10px; color: #9aa4b2; }
+    .state-strong { color: #9aa4b2; }
+    .state-wtt { color: #4ade80; }
+    .state-wtb { color: #f87171; }
 
-    #table-container { overflow: auto; max-height: 70vh; }
+    .levels-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 14px; }
+    .level-card { padding: 10px; border-radius: 6px; background: #0e1117; border: 1px solid #2a2f3a; }
+    .level-label { font-size: 9px; color: #6b7280; text-transform: uppercase; }
+    .level-value { font-size: 15px; font-weight: 800; margin-top: 2px; }
+    .lvl-eor { color: #ff4444; }
+    .lvl-eos { color: #67CF44; }
+    .lvl-ext { color: #ffa500; }
+    .lvl-below { color: #8b0000; }
 
-    table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 12px;
-    }
-    th, td {
-        padding: 6px 10px;
-        border: 1px solid #1c212b;
-        text-align: right;
-        white-space: nowrap;
-    }
-    th {
-        background: #161b22;
-        color: #9aa4b2;
-        font-weight: 600;
-        font-size: 11px;
-        position: sticky;
-        top: 0;
-        z-index: 1;
-    }
-    .strike {
-        font-weight: 700;
-        text-align: center;
-        background: #131820;
-        color: #fff;
-        font-size: 13px;
-    }
-    .tv { color: #c8c8d0; }
-    .gex-pos { color: #4ade80; font-weight: 700; }
-    .gex-neg { color: #f87171; font-weight: 700; }
-
-    .cell-max-ce-oi { background: #5a1d1d; color: #fff; }
-    .cell-max-pe-oi { background: #14522e; color: #fff; }
-    .cell-max-vol   { background: #10424a; color: #fff; }
-    .cell-yellow    { background: #4d4a00; color: #fff; }
-
-    .atm-marker {
-        display: inline-block;
-        background: #005eff;
-        color: #fff;
-        font-size: 9px;
-        font-weight: 800;
-        padding: 1px 5px;
-        border-radius: 3px;
-        margin-left: 6px;
-        vertical-align: middle;
-    }
-    .flip-marker {
-        display: inline-block;
-        background: #fbbf24;
-        color: #0b0e13;
-        font-size: 9px;
-        font-weight: 800;
-        padding: 1px 5px;
-        border-radius: 3px;
-        margin-left: 6px;
-        vertical-align: middle;
-    }
-    .wall-marker {
-        display: inline-block;
-        background: #a855f7;
-        color: #fff;
-        font-size: 9px;
-        font-weight: 800;
-        padding: 1px 5px;
-        border-radius: 3px;
-        margin-left: 6px;
-        vertical-align: middle;
-    }
+    #table-container { overflow: auto; max-height: 68vh; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    th, td { padding: 5px 8px; border: 1px solid #1c212b; text-align: right; white-space: nowrap; }
+    th { background: #161b22; color: #9aa4b2; font-weight: 600; font-size: 10px; position: sticky; top: 0; z-index: 1; }
+    .strike-col { font-weight: 700; text-align: center; background: #131820; color: #fff; font-size: 12px; position: relative; }
+    .pct-badge { font-size: 8px; color: #ffd166; display: block; }
+    .cell-max { background: #5a1d1d; color: #fff; }
+    .cell-max-pe { background: #14522e; color: #fff; }
+    .cell-yellow { background: #4d4a00; color: #fff; }
+    .cell-vol-max { background: #10424a; color: #fff; }
+    .breakout { color: #67CF44; font-weight: 800; }
+    .breakdown { color: #ff6b6b; font-weight: 800; }
+    .badge { display: inline-block; font-size: 8px; font-weight: 800; padding: 1px 4px; border-radius: 3px; margin-left: 4px; vertical-align: middle; }
+    .badge-atm { background: #005eff; color: #fff; }
+    .badge-pillar { background: #a855f7; color: #fff; }
+    .badge-breakout { background: #67CF44; color: #0b0e13; }
 </style>
 </head>
 <body>
 
-<h1>📊 NUVAMA · GAMMA EXPOSURE (GEX) ENGINE</h1>
+<h1>📊 INVESTING DADDY LTP CLONE</h1>
 <div id="status">Loading Python environment…</div>
 <div id="info">Waiting for live data from Nuvama tab…</div>
 
-<div id="gex-bar">
-    <div class="gex-card">
-        <div class="gex-label">Net GEX</div>
-        <div class="gex-value" id="gex-net">—</div>
-        <div class="gex-sub" id="gex-net-sub">—</div>
+<div class="state-row">
+    <div class="state-card">
+        <div class="state-label">CE Side (Resistance)</div>
+        <div class="state-value state-strong" id="ce-state">—</div>
+        <div class="state-sub" id="ce-state-sub">—</div>
     </div>
-    <div class="gex-card">
-        <div class="gex-label">Gamma Flip</div>
-        <div class="gex-value" id="gex-flip">—</div>
-        <div class="gex-sub" id="gex-flip-sub">—</div>
+    <div class="state-card">
+        <div class="state-label">PE Side (Support)</div>
+        <div class="state-value state-strong" id="pe-state">—</div>
+        <div class="state-sub" id="pe-state-sub">—</div>
     </div>
-    <div class="gex-card">
-        <div class="gex-label">Call Wall</div>
-        <div class="gex-value" id="gex-cwall">—</div>
-        <div class="gex-sub" id="gex-cwall-sub">—</div>
+</div>
+
+<div class="levels-row">
+    <div class="level-card">
+        <div class="level-label">EOR</div>
+        <div class="level-value lvl-eor" id="lvl-eor">—</div>
     </div>
-    <div class="gex-card">
-        <div class="gex-label">Put Wall</div>
-        <div class="gex-value" id="gex-pwall">—</div>
-        <div class="gex-sub" id="gex-pwall-sub">—</div>
+    <div class="level-card">
+        <div class="level-label">EOR + 1</div>
+        <div class="level-value lvl-ext" id="lvl-eor-plus">—</div>
+    </div>
+    <div class="level-card">
+        <div class="level-label">EOR − 1</div>
+        <div class="level-value lvl-below" id="lvl-eor-minus">—</div>
+    </div>
+    <div class="level-card">
+        <div class="level-label">EOS</div>
+        <div class="level-value lvl-eos" id="lvl-eos">—</div>
+    </div>
+    <div class="level-card">
+        <div class="level-label">EOS + 1</div>
+        <div class="level-value lvl-ext" id="lvl-eos-plus">—</div>
+    </div>
+    <div class="level-card">
+        <div class="level-label">EOS − 1</div>
+        <div class="level-value lvl-below" id="lvl-eos-minus">—</div>
     </div>
 </div>
 
 <div id="table-container"></div>
 
 <script>
-// ============================================================
-// PYODIDE BOOT
-// ============================================================
 let pyodide = null;
 let pyReady = false;
 
@@ -186,7 +109,7 @@ async function bootPython() {
         await pyodide.loadPackage(["numpy", "scipy"]);
         await pyodide.runPythonAsync(PYTHON_ENGINE);
         pyReady = true;
-        document.getElementById("status").innerText = "✅ Python GEX engine live — waiting for data";
+        document.getElementById("status").innerText = "✅ Python engine live — waiting for data";
     } catch (err) {
         document.getElementById("status").innerText = "❌ Python failed: " + err.message;
         console.error(err);
@@ -194,141 +117,180 @@ async function bootPython() {
 }
 
 // ============================================================
-// PYTHON ENGINE — GEX COMPUTATION
+// PYTHON ENGINE
 // ============================================================
 const PYTHON_ENGINE = `
 import numpy as np
 from scipy.stats import norm
+import json
 
-def compute_gamma(S, K, T, r, sigma):
-    """Black-Scholes Gamma for a European option."""
-    if S <= 0 or K <= 0 or T <= 0 or sigma <= 0:
-        return 0.0
+def bs_call(S, K, T, r, sigma):
+    if S <= 0 or K <= 0 or T <= 0 or sigma <= 0: return 0.0
     d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-    pdf_d1 = norm.pdf(d1)
-    return pdf_d1 / (S * sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    return S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
 
-def compute_gex(spot, atm_strike, days_to_expiry, rows, rate_pct):
+def bs_put(S, K, T, r, sigma):
+    if S <= 0 or K <= 0 or T <= 0 or sigma <= 0: return 0.0
+    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    return K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+
+def solve_srev(ltp, K, T, r, sigma_pct, opt_type):
+    if ltp is None or ltp <= 0.05 or sigma_pct is None or sigma_pct <= 0 or T <= 0:
+        return 0.0
+    sigma = sigma_pct / 100.0
+    S = float(K)
+    fn = bs_call if opt_type == "CE" else bs_put
+    for _ in range(20):
+        price = fn(S, K, T, r, sigma)
+        diff = price - ltp
+        if abs(diff) < 0.01: return float(S)
+        # Numerical delta
+        h = 0.01
+        delta = (fn(S + h, K, T, r, sigma) - price) / h
+        if abs(delta) < 1e-6: break
+        S = S - diff / delta
+        if S <= 0 or not np.isfinite(S): return 0.0
+    return float(S)
+
+def find_pillar(rows, atm_strike, side, metric):
     """
-    Compute Gamma Exposure (GEX) per strike and aggregate levels.
-
-    GEX(strike) = [Gamma_CE × OI_CE − Gamma_PE × OI_PE] × Spot² × 0.01
-
-    Assumption: dealers are LONG calls, SHORT puts (standard convention).
-    OI in lakhs (from Nuvama) is converted to absolute contracts by ×100,000.
+    Scan outward from ATM on given side (CE = up, PE = down).
+    Return the strike with highest metric value, closest to ATM.
     """
-    T = max(1e-5, int(round(days_to_expiry)) / 365.0)
+    sorted_rows = sorted(rows, key=lambda r: r["strike"])
+    atm_idx = None
+    for i, r in enumerate(sorted_rows):
+        if r["strike"] == atm_strike: atm_idx = i; break
+    if atm_idx is None: return None
+
+    max_val = -1
+    pillar = None
+    if side == "CE":
+        for i in range(atm_idx, len(sorted_rows)):
+            v = sorted_rows[i].get(metric) or 0
+            if v > max_val:
+                max_val = v; pillar = sorted_rows[i]
+    else:
+        for i in range(atm_idx, -1, -1):
+            v = sorted_rows[i].get(metric) or 0
+            if v > max_val:
+                max_val = v; pillar = sorted_rows[i]
+    return pillar
+
+def find_challenger(rows, pillar, metric):
+    """Second highest value in the same metric."""
+    sorted_rows = sorted(rows, key=lambda r: -(r.get(metric) or 0))
+    for r in sorted_rows:
+        if r["strike"] != pillar["strike"]:
+            return r
+    return None
+
+def compute_state(rows, pillar, metric, threshold=75.0):
+    """Determine STRONG / WTT / WTB for a side."""
+    if not pillar: return "STRONG", 0.0, None
+    max_val = pillar.get(metric) or 0
+    if max_val <= 0: return "STRONG", 0.0, None
+    challenger = find_challenger(rows, pillar, metric)
+    if not challenger: return "STRONG", 0.0, None
+    chal_val = challenger.get(metric) or 0
+    wpct = (chal_val / max_val) * 100.0
+    if wpct >= threshold:
+        if challenger["strike"] > pillar["strike"]:
+            return "WTT", wpct, challenger
+        elif challenger["strike"] < pillar["strike"]:
+            return "WTB", wpct, challenger
+    return "STRONG", wpct, challenger
+
+def compute_all(spot, atm_strike, days, rows, rate_pct):
+    T = max(1e-5, int(round(days)) / 365.0)
     r = rate_pct / 100.0
 
-    # Per-strike GEX
+    # CE pillar - use whichever is higher: Volume or OI
+    ce_pillar_vol = find_pillar(rows, atm_strike, "CE", "ceVol")
+    ce_pillar_oi  = find_pillar(rows, atm_strike, "CE", "ceOI")
+    # Prefer Volume (intraday priority)
+    ce_pillar = ce_pillar_vol if ce_pillar_vol else ce_pillar_oi
+
+    pe_pillar_vol = find_pillar(rows, atm_strike, "PE", "peVol")
+    pe_pillar_oi  = find_pillar(rows, atm_strike, "PE", "peOI")
+    pe_pillar = pe_pillar_vol if pe_pillar_vol else pe_pillar_oi
+
+    # Determine state per side
+    ce_state, ce_w, ce_chal = compute_state(rows, ce_pillar, "ceVol")
+    pe_state, pe_w, pe_chal = compute_state(rows, pe_pillar, "peVol")
+
+    # OI-based state as secondary
+    ce_oi_state, _, _ = compute_state(rows, ce_pillar_oi, "ceOI")
+    pe_oi_state, _, _ = compute_state(rows, pe_pillar_oi, "peOI")
+
+    # Compute EOR / EOS via BS solve on pillar strikes
+    sorted_rows = sorted(rows, key=lambda r: r["strike"])
+    def next_strike(from_strike, direction):
+        """direction: +1 for higher, -1 for lower"""
+        for i, row in enumerate(sorted_rows):
+            if row["strike"] == from_strike:
+                n = i + direction
+                if 0 <= n < len(sorted_rows):
+                    return sorted_rows[n]
+                return None
+        return None
+
+    eor = eos = eor_p = eor_m = eos_p = eos_m = 0
+
+    if ce_pillar:
+        eor = solve_srev(ce_pillar["ceLTP"], ce_pillar["strike"], T, r, ce_pillar["ceIV"], "CE")
+        row_p = next_strike(ce_pillar["strike"], +1)
+        row_m = next_strike(ce_pillar["strike"], -1)
+        if row_p: eor_p = solve_srev(row_p["ceLTP"], row_p["strike"], T, r, row_p["ceIV"], "CE")
+        if row_m: eor_m = solve_srev(row_m["ceLTP"], row_m["strike"], T, r, row_m["ceIV"], "CE")
+
+    if pe_pillar:
+        eos = solve_srev(pe_pillar["peLTP"], pe_pillar["strike"], T, r, pe_pillar["peIV"], "PE")
+        row_p = next_strike(pe_pillar["strike"], +1)
+        row_m = next_strike(pe_pillar["strike"], -1)
+        if row_p: eos_p = solve_srev(row_p["peLTP"], row_p["strike"], T, r, row_p["peIV"], "PE")
+        if row_m: eos_m = solve_srev(row_m["peLTP"], row_m["strike"], T, r, row_m["peIV"], "PE")
+
+    # Per-strike table data
     per_strike = []
-    for row in rows:
-        strike = row["strike"]
-        ce_iv = (row.get("ceIV") or 0) / 100.0
-        pe_iv = (row.get("peIV") or 0) / 100.0
-
-        # Use Nuvama's Gamma if present, else compute
-        ce_gamma = row.get("ceGamma") or 0
-        pe_gamma = row.get("peGamma") or 0
-
-        # Fallback: compute gamma from BS if Nuvama's is missing
-        if ce_gamma == 0 and ce_iv > 0:
-            ce_gamma = compute_gamma(spot, strike, T, r, ce_iv)
-        if pe_gamma == 0 and pe_iv > 0:
-            pe_gamma = compute_gamma(spot, strike, T, r, pe_iv)
-
-        # OI in lakhs → absolute contracts
-        ce_oi = (row.get("ceOI") or 0) * 100000
-        pe_oi = (row.get("peOI") or 0) * 100000
-
-        # Call GEX and Put GEX separately (for wall detection)
-        call_gex = ce_gamma * ce_oi
-        put_gex  = -pe_gamma * pe_oi   # negative because dealers short puts
-
-        net_gex = call_gex + put_gex
-
+    for row in sorted_rows:
         per_strike.append({
-            "strike": strike,
-            "callGEX": call_gex,
-            "putGEX": put_gex,
-            "netGEX": net_gex,
-            "ceOI": row.get("ceOI", 0),
-            "ceVol": row.get("ceVol", 0),
-            "ceIV": row.get("ceIV", 0),
-            "ceGamma": ce_gamma,
-            "ceLTP": row.get("ceLTP", 0),
-            "peOI": row.get("peOI", 0),
-            "peVol": row.get("peVol", 0),
-            "peIV": row.get("peIV", 0),
-            "peGamma": pe_gamma,
-            "peLTP": row.get("peLTP", 0)
+            "strike": row["strike"],
+            "ceOI": row["ceOI"], "ceVol": row["ceVol"], "ceIV": row["ceIV"], "ceLTP": row["ceLTP"],
+            "peOI": row["peOI"], "peVol": row["peVol"], "peIV": row["peIV"], "peLTP": row["peLTP"],
+            "ceSRev": solve_srev(row["ceLTP"], row["strike"], T, r, row["ceIV"], "CE"),
+            "peSRev": solve_srev(row["peLTP"], row["strike"], T, r, row["peIV"], "PE"),
+            "isCePillar": ce_pillar and row["strike"] == ce_pillar["strike"],
+            "isPePillar": pe_pillar and row["strike"] == pe_pillar["strike"],
         })
 
-    # Scale factor: Spot² × 0.01 (represents move of 1% in underlying)
-    scale = spot * spot * 0.01
-
-    for row in per_strike:
-        row["callGEX"] *= scale
-        row["putGEX"]  *= scale
-        row["netGEX"]  *= scale
-
-    # Total Net GEX (sum across all strikes)
-    net_gex_total = sum(r["netGEX"] for r in per_strike)
-
-    # Call Wall = strike with highest positive Call GEX
-    call_wall_row = max(per_strike, key=lambda r: r["callGEX"]) if per_strike else None
-
-    # Put Wall = strike with highest absolute Put GEX (deepest negative)
-    put_wall_row = min(per_strike, key=lambda r: r["putGEX"]) if per_strike else None
-
-    # Gamma Flip = spot where cumulative Net GEX crosses zero
-    # Sort by strike, walk up the ladder, find zero crossing
-    sorted_rows = sorted(per_strike, key=lambda r: r["strike"])
-    gamma_flip = None
-    cum = 0
-    for i in range(len(sorted_rows) - 1):
-        cum += sorted_rows[i]["netGEX"]
-        next_cum = cum + sorted_rows[i+1]["netGEX"]
-        if cum == 0:
-            gamma_flip = sorted_rows[i]["strike"]
-            break
-        if (cum < 0 and next_cum >= 0) or (cum > 0 and next_cum <= 0):
-            # Linear interpolation
-            x0 = sorted_rows[i]["strike"]
-            x1 = sorted_rows[i+1]["strike"]
-            y0 = cum
-            y1 = next_cum
-            gamma_flip = x0 + (x1 - x0) * (-y0) / (y1 - y0)
-            break
-
     return {
-        "netGEX": net_gex_total,
-        "gammaFlip": gamma_flip,
-        "callWall": call_wall_row["strike"] if call_wall_row else None,
-        "callWallGEX": call_wall_row["callGEX"] if call_wall_row else 0,
-        "putWall": put_wall_row["strike"] if put_wall_row else None,
-        "putWallGEX": put_wall_row["putGEX"] if put_wall_row else 0,
+        "spot": spot,
+        "atm": atm_strike,
+        "cePillarStrike": ce_pillar["strike"] if ce_pillar else None,
+        "pePillarStrike": pe_pillar["strike"] if pe_pillar else None,
+        "ceState": ce_state, "ceW": ce_w, "ceOIState": ce_oi_state,
+        "peState": pe_state, "peW": pe_w, "peOIState": pe_oi_state,
+        "EOR": eor, "EOS": eos,
+        "EORplus": eor_p, "EORminus": eor_m,
+        "EOSplus": eos_p, "EOSminus": eos_m,
         "perStrike": per_strike
     }
 `;
 
 // ============================================================
-// LISTEN FOR DATA FROM EXTENSION
+// RECEIVE DATA
 // ============================================================
 window.addEventListener("message", async (event) => {
     if (event.source !== window) return;
     if (!event.data || event.data.source !== "nuvama-extension") return;
-
-    if (event.data.type === "RELAY_READY") {
-        console.log("[webapp] extension relay ready");
-        return;
-    }
-
+    if (event.data.type === "RELAY_READY") { console.log("[webapp] relay ready"); return; }
     if (event.data.type !== "NUVAMA_DATA") return;
     if (!pyReady) return;
 
     const data = event.data.payload;
-
     try {
         pyodide.globals.set("_spot", data.spot);
         pyodide.globals.set("_atm", data.atmStrike);
@@ -339,168 +301,137 @@ window.addEventListener("message", async (event) => {
         const resultJson = pyodide.runPython(`
 import json
 _rows = json.loads(_rows_json)
-_result = compute_gex(_spot, _atm, _days, _rows, _rate)
+_result = compute_all(_spot, _atm, _days, _rows, _rate)
 json.dumps(_result)
 `);
 
-        const gex = JSON.parse(resultJson);
-
-        renderInfo(data);
-        renderGexBar(gex, data.spot);
-        renderTable(gex, data.spot, data.atmStrike);
-
-        document.getElementById("status").innerText =
-            "✅ Live — updated " + new Date().toLocaleTimeString();
+        const r = JSON.parse(resultJson);
+        saveCache(r);
+        renderAll(r, data);
+        document.getElementById("status").innerText = "✅ Live — updated " + new Date().toLocaleTimeString();
     } catch (err) {
-        document.getElementById("status").innerText = "❌ Compute error: " + err.message;
+        document.getElementById("status").innerText = "❌ Error: " + err.message;
         console.error(err);
     }
 });
 
 // ============================================================
-// RENDER INFO BAR
+// LOCALSTORAGE CACHE
 // ============================================================
-function renderInfo(data) {
-    const info = document.getElementById("info");
-    info.innerHTML = `
-        Spot: <b>${data.spot.toFixed(2)}</b> |
-        ATM: <b>${data.atmStrike}</b> |
-        Exp in <b>${data.daysToExpiry}d</b> |
-        ${new Date().toLocaleTimeString()}
+function saveCache(result) {
+    try {
+        const snap = {
+            timestamp: Date.now(),
+            spot: result.spot,
+            ceState: result.ceState, peState: result.peState,
+            EOR: result.EOR, EOS: result.EOS
+        };
+        let hist = JSON.parse(localStorage.getItem("ltp_history") || "[]");
+        hist.push(snap);
+        if (hist.length > 500) hist = hist.slice(-500);
+        localStorage.setItem("ltp_history", JSON.stringify(hist));
+        localStorage.setItem("ltp_latest", JSON.stringify(result));
+    } catch (e) {}
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+function renderAll(r, raw) {
+    // Info bar
+    document.getElementById("info").innerHTML = `
+        <span class="live-dot"></span>
+        Spot: <b>${r.spot.toFixed(2)}</b> |
+        ATM: <b>${r.atm}</b> |
+        Exp in <b>${raw.daysToExpiry}d</b> |
+        CE Pillar: <b>${r.cePillarStrike || "—"}</b> |
+        PE Pillar: <b>${r.pePillarStrike || "—"}</b>
     `;
+
+    // State cards
+    renderState("ce", r.ceState, r.ceW, r.cePillarStrike, r.ceOIState);
+    renderState("pe", r.peState, r.peW, r.pePillarStrike, r.peOIState);
+
+    // Levels
+    document.getElementById("lvl-eor").textContent = r.EOR ? r.EOR.toFixed(1) : "—";
+    document.getElementById("lvl-eor-plus").textContent = r.EORplus ? r.EORplus.toFixed(1) : "—";
+    document.getElementById("lvl-eor-minus").textContent = r.EORminus ? r.EORminus.toFixed(1) : "—";
+    document.getElementById("lvl-eos").textContent = r.EOS ? r.EOS.toFixed(1) : "—";
+    document.getElementById("lvl-eos-plus").textContent = r.EOSplus ? r.EOSplus.toFixed(1) : "—";
+    document.getElementById("lvl-eos-minus").textContent = r.EOSminus ? r.EOSminus.toFixed(1) : "—";
+
+    // Table
+    renderTable(r, raw);
 }
 
-// ============================================================
-// RENDER GEX BAR
-// ============================================================
-function renderGexBar(gex, spot) {
-    // Net GEX
-    const netEl = document.getElementById("gex-net");
-    const netSubEl = document.getElementById("gex-net-sub");
-    const netCr = gex.netGEX / 1e7;  // Convert to crores for readability
-    netEl.textContent = (netCr >= 0 ? "+" : "") + netCr.toFixed(1) + " Cr";
-
-    if (gex.netGEX > 0) {
-        netEl.className = "gex-value gex-positive";
-        netSubEl.textContent = "Stabilizing regime";
-    } else if (gex.netGEX < 0) {
-        netEl.className = "gex-value gex-negative";
-        netSubEl.textContent = "Amplifying regime";
-    } else {
-        netEl.className = "gex-value gex-neutral";
-        netSubEl.textContent = "Neutral";
-    }
-
-    // Gamma Flip
-    const flipEl = document.getElementById("gex-flip");
-    const flipSubEl = document.getElementById("gex-flip-sub");
-    if (gex.gammaFlip) {
-        flipEl.textContent = gex.gammaFlip.toFixed(0);
-        if (spot > gex.gammaFlip) {
-            flipEl.className = "gex-value gex-positive";
-            flipSubEl.textContent = `Spot is ${(spot - gex.gammaFlip).toFixed(0)} above`;
-        } else {
-            flipEl.className = "gex-value gex-negative";
-            flipSubEl.textContent = `Spot is ${(gex.gammaFlip - spot).toFixed(0)} below`;
-        }
-    } else {
-        flipEl.textContent = "—";
-        flipSubEl.textContent = "No zero crossing in window";
-    }
-
-    // Call Wall
-    const cwallEl = document.getElementById("gex-cwall");
-    const cwallSubEl = document.getElementById("gex-cwall-sub");
-    if (gex.callWall) {
-        cwallEl.textContent = gex.callWall;
-        cwallEl.className = "gex-value gex-positive";
-        cwallSubEl.textContent = `GEX: ${(gex.callWallGEX / 1e7).toFixed(1)} Cr`;
-    }
-
-    // Put Wall
-    const pwallEl = document.getElementById("gex-pwall");
-    const pwallSubEl = document.getElementById("gex-pwall-sub");
-    if (gex.putWall) {
-        pwallEl.textContent = gex.putWall;
-        pwallEl.className = "gex-value gex-negative";
-        pwallSubEl.textContent = `GEX: ${(gex.putWallGEX / 1e7).toFixed(1)} Cr`;
-    }
+function renderState(side, state, w, pillarStrike, oiState) {
+    const valEl = document.getElementById(side + "-state");
+    const subEl = document.getElementById(side + "-state-sub");
+    const cls = state === "WTT" ? "state-wtt" : state === "WTB" ? "state-wtb" : "state-strong";
+    valEl.className = "state-value " + cls;
+    valEl.textContent = state;
+    subEl.textContent = `Pillar: ${pillarStrike || "—"} | Weakness: ${w.toFixed(1)}% | OI State: ${oiState}`;
 }
 
-// ============================================================
-// RENDER TABLE
-// ============================================================
-function renderTable(gex, spot, atmStrike) {
-    const container = document.getElementById("table-container");
-    if (!container) return;
-
-    const rows = gex.perStrike;
-    const maxCE_OI  = Math.max(...rows.map(r => r.ceOI), 0);
-    const maxPE_OI  = Math.max(...rows.map(r => r.peOI), 0);
-    const maxCE_Vol = Math.max(...rows.map(r => r.ceVol), 0);
-    const maxPE_Vol = Math.max(...rows.map(r => r.peVol), 0);
-    const maxGEX = Math.max(...rows.map(r => Math.abs(r.netGEX)), 1);
+function renderTable(r, raw) {
+    const rows = r.perStrike;
+    const maxCE_OI = Math.max(...rows.map(x => x.ceOI), 0);
+    const maxPE_OI = Math.max(...rows.map(x => x.peOI), 0);
+    const maxCE_Vol = Math.max(...rows.map(x => x.ceVol), 0);
+    const maxPE_Vol = Math.max(...rows.map(x => x.peVol), 0);
 
     let html = `<table><thead><tr>
         <th>CE OI</th>
         <th>CE Vol</th>
-        <th>CE Gamma</th>
-        <th>Call GEX</th>
+        <th>CE LTP</th>
+        <th>CE S-Rev</th>
         <th>STRIKE</th>
-        <th>Net GEX</th>
-        <th>Put GEX</th>
-        <th>PE Gamma</th>
+        <th>PE S-Rev</th>
+        <th>PE LTP</th>
         <th>PE Vol</th>
         <th>PE OI</th>
     </tr></thead><tbody>`;
 
-    rows.forEach(r => {
-        const isATM = r.strike === atmStrike;
-        const isFlip = gex.gammaFlip && Math.abs(r.strike - gex.gammaFlip) <= 25;
-        const isCallWall = r.strike === gex.callWall;
-        const isPutWall  = r.strike === gex.putWall;
+    rows.forEach(row => {
+        const isATM = row.strike === r.atm;
 
-        const ceOICls = r.ceOI === maxCE_OI ? "cell-max-ce-oi"
-                      : (maxCE_OI && r.ceOI / maxCE_OI >= 0.75) ? "cell-yellow" : "";
-        const ceVolCls = r.ceVol === maxCE_Vol ? "cell-max-vol"
-                       : (maxCE_Vol && r.ceVol / maxCE_Vol >= 0.75) ? "cell-yellow" : "";
-        const peVolCls = r.peVol === maxPE_Vol ? "cell-max-vol"
-                       : (maxPE_Vol && r.peVol / maxPE_Vol >= 0.75) ? "cell-yellow" : "";
-        const peOICls = r.peOI === maxPE_OI ? "cell-max-pe-oi"
-                      : (maxPE_OI && r.peOI / maxPE_OI >= 0.75) ? "cell-yellow" : "";
+        // Heatmap classes
+        const ceOICls = row.ceOI === maxCE_OI ? "cell-max" : (maxCE_OI && row.ceOI / maxCE_OI >= 0.75) ? "cell-yellow" : "";
+        const ceVolCls = row.ceVol === maxCE_Vol ? "cell-vol-max" : (maxCE_Vol && row.ceVol / maxCE_Vol >= 0.75) ? "cell-yellow" : "";
+        const peVolCls = row.peVol === maxPE_Vol ? "cell-vol-max" : (maxPE_Vol && row.peVol / maxPE_Vol >= 0.75) ? "cell-yellow" : "";
+        const peOICls = row.peOI === maxPE_OI ? "cell-max-pe" : (maxPE_OI && row.peOI / maxPE_OI >= 0.75) ? "cell-yellow" : "";
 
-        const netGexCls = r.netGEX >= 0 ? "gex-pos" : "gex-neg";
-        const netGexCr = r.netGEX / 1e7;
+        // Breakout/Breakdown detection
+        const ceBreakout = row.ceSRev > 0 && r.spot >= row.ceSRev;
+        const peBreakdown = row.peSRev > 0 && r.spot <= row.peSRev;
 
-        let strikeHtml = r.strike.toLocaleString("en-IN");
-        if (isATM) strikeHtml += '<span class="atm-marker">ATM</span>';
-        if (isFlip) strikeHtml += '<span class="flip-marker">FLIP</span>';
-        if (isCallWall) strikeHtml += '<span class="wall-marker">C-WALL</span>';
-        if (isPutWall) strikeHtml += '<span class="wall-marker">P-WALL</span>';
+        const ceSRevCls = ceBreakout ? "breakout" : "";
+        const peSRevCls = peBreakdown ? "breakdown" : "";
+
+        // Badges
+        let strikeHtml = row.strike.toLocaleString("en-IN");
+        if (isATM) strikeHtml += '<span class="badge badge-atm">ATM</span>';
+        if (row.isCePillar) strikeHtml += '<span class="badge badge-pillar">CE-P</span>';
+        if (row.isPePillar) strikeHtml += '<span class="badge badge-pillar">PE-P</span>';
 
         html += `<tr>`;
-        html += `<td class="${ceOICls}">${r.ceOI.toFixed(2)}</td>`;
-        html += `<td class="${ceVolCls}">${r.ceVol.toLocaleString("en-IN")}</td>`;
-        html += `<td class="tv">${r.ceGamma.toFixed(5)}</td>`;
-        html += `<td class="gex-pos">${(r.callGEX / 1e7).toFixed(1)}</td>`;
-        html += `<td class="strike">${strikeHtml}</td>`;
-        html += `<td class="${netGexCls}">${netGexCr >= 0 ? "+" : ""}${netGexCr.toFixed(1)}</td>`;
-        html += `<td class="gex-neg">${(r.putGEX / 1e7).toFixed(1)}</td>`;
-        html += `<td class="tv">${r.peGamma.toFixed(5)}</td>`;
-        html += `<td class="${peVolCls}">${r.peVol.toLocaleString("en-IN")}</td>`;
-        html += `<td class="${peOICls}">${r.peOI.toFixed(2)}</td>`;
+        html += `<td class="${ceOICls}">${row.ceOI.toFixed(2)}</td>`;
+        html += `<td class="${ceVolCls}">${row.ceVol.toLocaleString("en-IN")}</td>`;
+        html += `<td>${row.ceLTP.toFixed(2)}</td>`;
+        html += `<td class="${ceSRevCls}">${row.ceSRev.toFixed(1)}${ceBreakout ? " ▲" : ""}</td>`;
+        html += `<td class="strike-col">${strikeHtml}</td>`;
+        html += `<td class="${peSRevCls}">${row.peSRev.toFixed(1)}${peBreakdown ? " ▼" : ""}</td>`;
+        html += `<td>${row.peLTP.toFixed(2)}</td>`;
+        html += `<td class="${peVolCls}">${row.peVol.toLocaleString("en-IN")}</td>`;
+        html += `<td class="${peOICls}">${row.peOI.toFixed(2)}</td>`;
         html += `</tr>`;
     });
 
     html += `</tbody></table>`;
-    container.innerHTML = html;
+    document.getElementById("table-container").innerHTML = html;
 }
 
-// ============================================================
-// BOOT
-// ============================================================
 bootPython();
 </script>
-
 </body>
 </html>
