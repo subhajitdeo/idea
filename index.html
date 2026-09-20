@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Nuvama Implied Spot Engine</title>
+<title>Nuvama GEX Engine</title>
 <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
 <style>
     * { box-sizing: border-box; }
@@ -35,7 +35,41 @@
         border-radius: 6px;
     }
     #info b { color: #fff; }
-    #table-container { overflow: auto; max-height: 85vh; }
+
+    #gex-bar {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-bottom: 16px;
+    }
+    .gex-card {
+        padding: 12px;
+        background: #0e1117;
+        border: 1px solid #2a2f3a;
+        border-radius: 8px;
+    }
+    .gex-label {
+        font-size: 10px;
+        color: #6b7280;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+    }
+    .gex-value {
+        font-size: 18px;
+        font-weight: 800;
+        color: #fff;
+    }
+    .gex-sub {
+        font-size: 10px;
+        color: #9aa4b2;
+        margin-top: 4px;
+    }
+    .gex-positive { color: #4ade80; }
+    .gex-negative { color: #f87171; }
+    .gex-neutral  { color: #fbbf24; }
+
+    #table-container { overflow: auto; max-height: 70vh; }
 
     table {
         width: 100%;
@@ -64,10 +98,9 @@
         color: #fff;
         font-size: 13px;
     }
-    .srev { color: #ffd166; font-weight: 700; }
-    .break-ce { color: #67CF44; font-weight: 800; }
-    .break-pe { color: #ff6b6b; font-weight: 800; }
-    .tv { color: #c8c8d0; font-weight: 600; }
+    .tv { color: #c8c8d0; }
+    .gex-pos { color: #4ade80; font-weight: 700; }
+    .gex-neg { color: #f87171; font-weight: 700; }
 
     .cell-max-ce-oi { background: #5a1d1d; color: #fff; }
     .cell-max-pe-oi { background: #14522e; color: #fff; }
@@ -85,13 +118,59 @@
         margin-left: 6px;
         vertical-align: middle;
     }
+    .flip-marker {
+        display: inline-block;
+        background: #fbbf24;
+        color: #0b0e13;
+        font-size: 9px;
+        font-weight: 800;
+        padding: 1px 5px;
+        border-radius: 3px;
+        margin-left: 6px;
+        vertical-align: middle;
+    }
+    .wall-marker {
+        display: inline-block;
+        background: #a855f7;
+        color: #fff;
+        font-size: 9px;
+        font-weight: 800;
+        padding: 1px 5px;
+        border-radius: 3px;
+        margin-left: 6px;
+        vertical-align: middle;
+    }
 </style>
 </head>
 <body>
 
-<h1>📊 NUVAMA · IMPLIED SPOT ENGINE</h1>
+<h1>📊 NUVAMA · GAMMA EXPOSURE (GEX) ENGINE</h1>
 <div id="status">Loading Python environment…</div>
 <div id="info">Waiting for live data from Nuvama tab…</div>
+
+<div id="gex-bar">
+    <div class="gex-card">
+        <div class="gex-label">Net GEX</div>
+        <div class="gex-value" id="gex-net">—</div>
+        <div class="gex-sub" id="gex-net-sub">—</div>
+    </div>
+    <div class="gex-card">
+        <div class="gex-label">Gamma Flip</div>
+        <div class="gex-value" id="gex-flip">—</div>
+        <div class="gex-sub" id="gex-flip-sub">—</div>
+    </div>
+    <div class="gex-card">
+        <div class="gex-label">Call Wall</div>
+        <div class="gex-value" id="gex-cwall">—</div>
+        <div class="gex-sub" id="gex-cwall-sub">—</div>
+    </div>
+    <div class="gex-card">
+        <div class="gex-label">Put Wall</div>
+        <div class="gex-value" id="gex-pwall">—</div>
+        <div class="gex-sub" id="gex-pwall-sub">—</div>
+    </div>
+</div>
+
 <div id="table-container"></div>
 
 <script>
@@ -107,7 +186,7 @@ async function bootPython() {
         await pyodide.loadPackage(["numpy", "scipy"]);
         await pyodide.runPythonAsync(PYTHON_ENGINE);
         pyReady = true;
-        document.getElementById("status").innerText = "✅ Python engine live — waiting for data";
+        document.getElementById("status").innerText = "✅ Python GEX engine live — waiting for data";
     } catch (err) {
         document.getElementById("status").innerText = "❌ Python failed: " + err.message;
         console.error(err);
@@ -115,99 +194,122 @@ async function bootPython() {
 }
 
 // ============================================================
-// PYTHON ENGINE — NEWTON-RAPHSON, PER-STRIKE IV
+// PYTHON ENGINE — GEX COMPUTATION
 // ============================================================
 const PYTHON_ENGINE = `
 import numpy as np
 from scipy.stats import norm
 
-def bs_call_and_delta(S, K, T, r, sigma):
+def compute_gamma(S, K, T, r, sigma):
+    """Black-Scholes Gamma for a European option."""
     if S <= 0 or K <= 0 or T <= 0 or sigma <= 0:
-        return 0.0, 0.0
+        return 0.0
     d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-    d2 = d1 - sigma * np.sqrt(T)
-    price = S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
-    delta = norm.cdf(d1)
-    return price, delta
+    pdf_d1 = norm.pdf(d1)
+    return pdf_d1 / (S * sigma * np.sqrt(T))
 
-def bs_put_and_delta(S, K, T, r, sigma):
-    if S <= 0 or K <= 0 or T <= 0 or sigma <= 0:
-        return 0.0, 0.0
-    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
-    d2 = d1 - sigma * np.sqrt(T)
-    price = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
-    delta = norm.cdf(d1) - 1.0
-    return price, delta
+def compute_gex(spot, atm_strike, days_to_expiry, rows, rate_pct):
+    """
+    Compute Gamma Exposure (GEX) per strike and aggregate levels.
 
-def solve_reversal_newton(ltp, K, T, r, sigma_pct, opt_type):
-    """Newton-Raphson solver — uses analytical Delta for fast convergence."""
-    if ltp is None or ltp <= 0.05:
-        return 0.0
-    if sigma_pct is None or sigma_pct <= 0:
-        return 0.0
-    if T is None or T <= 0:
-        return 0.0
+    GEX(strike) = [Gamma_CE × OI_CE − Gamma_PE × OI_PE] × Spot² × 0.01
 
-    sigma = sigma_pct / 100.0
-    S = float(K)
-    fn = bs_call_and_delta if opt_type == "CE" else bs_put_and_delta
-
-    for _ in range(15):
-        price, delta = fn(S, K, T, r, sigma)
-        diff = price - ltp
-
-        if abs(diff) < 0.0001:
-            return float(S)
-
-        if abs(delta) < 1e-6:
-            break
-
-        S = S - (diff / delta)
-
-        if S <= 0 or not np.isfinite(S):
-            return 0.0
-
-    return float(S)
-
-def compute_all(spot, atm_strike, days_to_expiry, rows, rate_pct):
-    T = max(1e-5, days_to_expiry / 365.0)
+    Assumption: dealers are LONG calls, SHORT puts (standard convention).
+    OI in lakhs (from Nuvama) is converted to absolute contracts by ×100,000.
+    """
+    T = max(1e-5, int(round(days_to_expiry)) / 365.0)
     r = rate_pct / 100.0
 
-    out = []
+    # Per-strike GEX
+    per_strike = []
     for row in rows:
         strike = row["strike"]
-        ce_iv = row.get("ceIV") or 0
-        pe_iv = row.get("peIV") or 0
+        ce_iv = (row.get("ceIV") or 0) / 100.0
+        pe_iv = (row.get("peIV") or 0) / 100.0
 
-        # Per-strike, per-side IV. Skip row if IV is missing (Q1 = a)
-        if ce_iv > 0:
-            ce_srev = solve_reversal_newton(row.get("ceLTP"), strike, T, r, ce_iv, "CE")
-        else:
-            ce_srev = 0.0
+        # Use Nuvama's Gamma if present, else compute
+        ce_gamma = row.get("ceGamma") or 0
+        pe_gamma = row.get("peGamma") or 0
 
-        if pe_iv > 0:
-            pe_srev = solve_reversal_newton(row.get("peLTP"), strike, T, r, pe_iv, "PE")
-        else:
-            pe_srev = 0.0
+        # Fallback: compute gamma from BS if Nuvama's is missing
+        if ce_gamma == 0 and ce_iv > 0:
+            ce_gamma = compute_gamma(spot, strike, T, r, ce_iv)
+        if pe_gamma == 0 and pe_iv > 0:
+            pe_gamma = compute_gamma(spot, strike, T, r, pe_iv)
 
-        ce_int = max(0.0, spot - strike)
-        pe_int = max(0.0, strike - spot)
-        ce_tv = max(0.0, (row.get("ceLTP") or 0.0) - ce_int)
-        pe_tv = max(0.0, (row.get("peLTP") or 0.0) - pe_int)
+        # OI in lakhs → absolute contracts
+        ce_oi = (row.get("ceOI") or 0) * 100000
+        pe_oi = (row.get("peOI") or 0) * 100000
 
-        out.append({
+        # Call GEX and Put GEX separately (for wall detection)
+        call_gex = ce_gamma * ce_oi
+        put_gex  = -pe_gamma * pe_oi   # negative because dealers short puts
+
+        net_gex = call_gex + put_gex
+
+        per_strike.append({
             "strike": strike,
+            "callGEX": call_gex,
+            "putGEX": put_gex,
+            "netGEX": net_gex,
             "ceOI": row.get("ceOI", 0),
             "ceVol": row.get("ceVol", 0),
-            "ceTV": ce_tv,
-            "ceSRev": ce_srev,
-            "peSRev": pe_srev,
-            "peTV": pe_tv,
+            "ceIV": row.get("ceIV", 0),
+            "ceGamma": ce_gamma,
+            "ceLTP": row.get("ceLTP", 0),
+            "peOI": row.get("peOI", 0),
             "peVol": row.get("peVol", 0),
-            "peOI": row.get("peOI", 0)
+            "peIV": row.get("peIV", 0),
+            "peGamma": pe_gamma,
+            "peLTP": row.get("peLTP", 0)
         })
 
-    return out
+    # Scale factor: Spot² × 0.01 (represents move of 1% in underlying)
+    scale = spot * spot * 0.01
+
+    for row in per_strike:
+        row["callGEX"] *= scale
+        row["putGEX"]  *= scale
+        row["netGEX"]  *= scale
+
+    # Total Net GEX (sum across all strikes)
+    net_gex_total = sum(r["netGEX"] for r in per_strike)
+
+    # Call Wall = strike with highest positive Call GEX
+    call_wall_row = max(per_strike, key=lambda r: r["callGEX"]) if per_strike else None
+
+    # Put Wall = strike with highest absolute Put GEX (deepest negative)
+    put_wall_row = min(per_strike, key=lambda r: r["putGEX"]) if per_strike else None
+
+    # Gamma Flip = spot where cumulative Net GEX crosses zero
+    # Sort by strike, walk up the ladder, find zero crossing
+    sorted_rows = sorted(per_strike, key=lambda r: r["strike"])
+    gamma_flip = None
+    cum = 0
+    for i in range(len(sorted_rows) - 1):
+        cum += sorted_rows[i]["netGEX"]
+        next_cum = cum + sorted_rows[i+1]["netGEX"]
+        if cum == 0:
+            gamma_flip = sorted_rows[i]["strike"]
+            break
+        if (cum < 0 and next_cum >= 0) or (cum > 0 and next_cum <= 0):
+            # Linear interpolation
+            x0 = sorted_rows[i]["strike"]
+            x1 = sorted_rows[i+1]["strike"]
+            y0 = cum
+            y1 = next_cum
+            gamma_flip = x0 + (x1 - x0) * (-y0) / (y1 - y0)
+            break
+
+    return {
+        "netGEX": net_gex_total,
+        "gammaFlip": gamma_flip,
+        "callWall": call_wall_row["strike"] if call_wall_row else None,
+        "callWallGEX": call_wall_row["callGEX"] if call_wall_row else 0,
+        "putWall": put_wall_row["strike"] if put_wall_row else None,
+        "putWallGEX": put_wall_row["putGEX"] if put_wall_row else 0,
+        "perStrike": per_strike
+    }
 `;
 
 // ============================================================
@@ -237,14 +339,15 @@ window.addEventListener("message", async (event) => {
         const resultJson = pyodide.runPython(`
 import json
 _rows = json.loads(_rows_json)
-_result = compute_all(_spot, _atm, _days, _rows, _rate)
+_result = compute_gex(_spot, _atm, _days, _rows, _rate)
 json.dumps(_result)
 `);
 
-        const computed = JSON.parse(resultJson);
+        const gex = JSON.parse(resultJson);
 
-        renderInfo(data, computed);
-        renderTable(computed, data.spot, data.atmStrike);
+        renderInfo(data);
+        renderGexBar(gex, data.spot);
+        renderTable(gex, data.spot, data.atmStrike);
 
         document.getElementById("status").innerText =
             "✅ Live — updated " + new Date().toLocaleTimeString();
@@ -257,83 +360,133 @@ json.dumps(_result)
 // ============================================================
 // RENDER INFO BAR
 // ============================================================
-function renderInfo(data, rows) {
+function renderInfo(data) {
     const info = document.getElementById("info");
-    const expDays = data.daysToExpiry.toFixed(2);
-
-    const atmRow = rows.find(r => r.strike === data.atmStrike);
-    const ceSRevAtm = atmRow ? atmRow.ceSRev.toFixed(2) : "—";
-    const peSRevAtm = atmRow ? atmRow.peSRev.toFixed(2) : "—";
-
     info.innerHTML = `
         Spot: <b>${data.spot.toFixed(2)}</b> |
         ATM: <b>${data.atmStrike}</b> |
-        CE S-Rev: <b>${ceSRevAtm}</b> |
-        PE S-Rev: <b>${peSRevAtm}</b> |
-        Exp in <b>${expDays}d</b> |
+        Exp in <b>${data.daysToExpiry}d</b> |
         ${new Date().toLocaleTimeString()}
     `;
 }
 
 // ============================================================
+// RENDER GEX BAR
+// ============================================================
+function renderGexBar(gex, spot) {
+    // Net GEX
+    const netEl = document.getElementById("gex-net");
+    const netSubEl = document.getElementById("gex-net-sub");
+    const netCr = gex.netGEX / 1e7;  // Convert to crores for readability
+    netEl.textContent = (netCr >= 0 ? "+" : "") + netCr.toFixed(1) + " Cr";
+
+    if (gex.netGEX > 0) {
+        netEl.className = "gex-value gex-positive";
+        netSubEl.textContent = "Stabilizing regime";
+    } else if (gex.netGEX < 0) {
+        netEl.className = "gex-value gex-negative";
+        netSubEl.textContent = "Amplifying regime";
+    } else {
+        netEl.className = "gex-value gex-neutral";
+        netSubEl.textContent = "Neutral";
+    }
+
+    // Gamma Flip
+    const flipEl = document.getElementById("gex-flip");
+    const flipSubEl = document.getElementById("gex-flip-sub");
+    if (gex.gammaFlip) {
+        flipEl.textContent = gex.gammaFlip.toFixed(0);
+        if (spot > gex.gammaFlip) {
+            flipEl.className = "gex-value gex-positive";
+            flipSubEl.textContent = `Spot is ${(spot - gex.gammaFlip).toFixed(0)} above`;
+        } else {
+            flipEl.className = "gex-value gex-negative";
+            flipSubEl.textContent = `Spot is ${(gex.gammaFlip - spot).toFixed(0)} below`;
+        }
+    } else {
+        flipEl.textContent = "—";
+        flipSubEl.textContent = "No zero crossing in window";
+    }
+
+    // Call Wall
+    const cwallEl = document.getElementById("gex-cwall");
+    const cwallSubEl = document.getElementById("gex-cwall-sub");
+    if (gex.callWall) {
+        cwallEl.textContent = gex.callWall;
+        cwallEl.className = "gex-value gex-positive";
+        cwallSubEl.textContent = `GEX: ${(gex.callWallGEX / 1e7).toFixed(1)} Cr`;
+    }
+
+    // Put Wall
+    const pwallEl = document.getElementById("gex-pwall");
+    const pwallSubEl = document.getElementById("gex-pwall-sub");
+    if (gex.putWall) {
+        pwallEl.textContent = gex.putWall;
+        pwallEl.className = "gex-value gex-negative";
+        pwallSubEl.textContent = `GEX: ${(gex.putWallGEX / 1e7).toFixed(1)} Cr`;
+    }
+}
+
+// ============================================================
 // RENDER TABLE
 // ============================================================
-function renderTable(rows, spot, atmStrike) {
+function renderTable(gex, spot, atmStrike) {
     const container = document.getElementById("table-container");
     if (!container) return;
 
+    const rows = gex.perStrike;
     const maxCE_OI  = Math.max(...rows.map(r => r.ceOI), 0);
     const maxPE_OI  = Math.max(...rows.map(r => r.peOI), 0);
     const maxCE_Vol = Math.max(...rows.map(r => r.ceVol), 0);
     const maxPE_Vol = Math.max(...rows.map(r => r.peVol), 0);
+    const maxGEX = Math.max(...rows.map(r => Math.abs(r.netGEX)), 1);
 
     let html = `<table><thead><tr>
         <th>CE OI</th>
         <th>CE Vol</th>
-        <th>CE TV</th>
-        <th>CE S-Rev</th>
+        <th>CE Gamma</th>
+        <th>Call GEX</th>
         <th>STRIKE</th>
-        <th>PE S-Rev</th>
-        <th>PE TV</th>
+        <th>Net GEX</th>
+        <th>Put GEX</th>
+        <th>PE Gamma</th>
         <th>PE Vol</th>
         <th>PE OI</th>
     </tr></thead><tbody>`;
 
     rows.forEach(r => {
         const isATM = r.strike === atmStrike;
+        const isFlip = gex.gammaFlip && Math.abs(r.strike - gex.gammaFlip) <= 25;
+        const isCallWall = r.strike === gex.callWall;
+        const isPutWall  = r.strike === gex.putWall;
 
         const ceOICls = r.ceOI === maxCE_OI ? "cell-max-ce-oi"
                       : (maxCE_OI && r.ceOI / maxCE_OI >= 0.75) ? "cell-yellow" : "";
         const ceVolCls = r.ceVol === maxCE_Vol ? "cell-max-vol"
                        : (maxCE_Vol && r.ceVol / maxCE_Vol >= 0.75) ? "cell-yellow" : "";
-
         const peVolCls = r.peVol === maxPE_Vol ? "cell-max-vol"
                        : (maxPE_Vol && r.peVol / maxPE_Vol >= 0.75) ? "cell-yellow" : "";
         const peOICls = r.peOI === maxPE_OI ? "cell-max-pe-oi"
                       : (maxPE_OI && r.peOI / maxPE_OI >= 0.75) ? "cell-yellow" : "";
 
-        let ceSRevHtml;
-        if (r.ceSRev > 0 && spot >= r.ceSRev) {
-            ceSRevHtml = `<td class="break-ce">${r.ceSRev.toFixed(1)} ●</td>`;
-        } else {
-            ceSRevHtml = `<td class="srev">${r.ceSRev.toFixed(2)}</td>`;
-        }
+        const netGexCls = r.netGEX >= 0 ? "gex-pos" : "gex-neg";
+        const netGexCr = r.netGEX / 1e7;
 
-        let peSRevHtml;
-        if (r.peSRev > 0 && spot <= r.peSRev) {
-            peSRevHtml = `<td class="break-pe">${r.peSRev.toFixed(1)} ●</td>`;
-        } else {
-            peSRevHtml = `<td class="srev">${r.peSRev.toFixed(2)}</td>`;
-        }
+        let strikeHtml = r.strike.toLocaleString("en-IN");
+        if (isATM) strikeHtml += '<span class="atm-marker">ATM</span>';
+        if (isFlip) strikeHtml += '<span class="flip-marker">FLIP</span>';
+        if (isCallWall) strikeHtml += '<span class="wall-marker">C-WALL</span>';
+        if (isPutWall) strikeHtml += '<span class="wall-marker">P-WALL</span>';
 
         html += `<tr>`;
         html += `<td class="${ceOICls}">${r.ceOI.toFixed(2)}</td>`;
         html += `<td class="${ceVolCls}">${r.ceVol.toLocaleString("en-IN")}</td>`;
-        html += `<td class="tv">${r.ceTV.toFixed(2)}</td>`;
-        html += ceSRevHtml;
-        html += `<td class="strike">${r.strike.toLocaleString("en-IN")}${isATM ? '<span class="atm-marker">ATM</span>' : ''}</td>`;
-        html += peSRevHtml;
-        html += `<td class="tv">${r.peTV.toFixed(2)}</td>`;
+        html += `<td class="tv">${r.ceGamma.toFixed(5)}</td>`;
+        html += `<td class="gex-pos">${(r.callGEX / 1e7).toFixed(1)}</td>`;
+        html += `<td class="strike">${strikeHtml}</td>`;
+        html += `<td class="${netGexCls}">${netGexCr >= 0 ? "+" : ""}${netGexCr.toFixed(1)}</td>`;
+        html += `<td class="gex-neg">${(r.putGEX / 1e7).toFixed(1)}</td>`;
+        html += `<td class="tv">${r.peGamma.toFixed(5)}</td>`;
         html += `<td class="${peVolCls}">${r.peVol.toLocaleString("en-IN")}</td>`;
         html += `<td class="${peOICls}">${r.peOI.toFixed(2)}</td>`;
         html += `</tr>`;
